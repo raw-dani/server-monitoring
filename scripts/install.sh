@@ -68,6 +68,20 @@ done
 # 2. Setup Dedicated User & Group
 SHSM_USER="shsm"
 SHSM_GROUP="shsm"
+
+# Clean stale lock files if any
+rm -f /etc/passwd.lock /etc/shadow.lock /etc/group.lock /etc/gshadow.lock /etc/.pwd.lock 2>/dev/null || true
+
+# Check and temporarily remove immutable attribute if set by security hardening
+WAS_PASSWD_IMMUTABLE=false
+if command -v lsattr &>/dev/null && command -v chattr &>/dev/null; then
+    if lsattr /etc/passwd 2>/dev/null | grep -q -- "-i-"; then
+        log_warn "Detected immutable attribute (+i) on /etc/passwd. Temporarily unlocking..."
+        chattr -i /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>/dev/null || true
+        WAS_PASSWD_IMMUTABLE=true
+    fi
+fi
+
 if ! getent group "$SHSM_GROUP" &>/dev/null; then
     log_info "Creating group: $SHSM_GROUP"
     groupadd --system "$SHSM_GROUP"
@@ -76,6 +90,12 @@ fi
 if ! id -u "$SHSM_USER" &>/dev/null; then
     log_info "Creating system user: $SHSM_USER"
     useradd --system --gid "$SHSM_GROUP" --shell /bin/false --no-create-home "$SHSM_USER"
+fi
+
+# Restore immutable attribute if it was previously set
+if [ "$WAS_PASSWD_IMMUTABLE" = true ] && command -v chattr &>/dev/null; then
+    log_info "Restoring immutable attribute (+i) on /etc/passwd..."
+    chattr +i /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>/dev/null || true
 fi
 
 # Add shsm to adm group to allow reading system logs if appropriate
