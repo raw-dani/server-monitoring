@@ -58,8 +58,10 @@ class InventoryRepo:
             for s in sites:
                 seen.add(s["domain"])
                 row = self.db.query_one("SELECT id, removed_at FROM websites WHERE domain=?", (s["domain"],))
+                exp_status = s.get("expected_status")
+                exp_json = json.dumps(exp_status) if exp_status else None
                 values = (json.dumps(s.get("aliases", [])), s.get("doc_root"), s.get("owner"), s.get("group"),
-                          s.get("vhost_conf"), s.get("source"), json.dumps(s.get("expected_status") or []))
+                          s.get("vhost_conf"), s.get("source"), exp_json)
                 if row is None:
                     self.db.execute(
                         "INSERT INTO websites (domain, aliases_json, doc_root, owner, grp, vhost_conf, source, expected_status_json, "

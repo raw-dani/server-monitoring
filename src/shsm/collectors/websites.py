@@ -34,6 +34,9 @@ def _check_http(
     expected_statuses: List[int],
     max_redirects: int = 5,
 ) -> Dict[str, Any]:
+    if not expected_statuses:
+        expected_statuses = [200, 201, 204, 301, 302, 307, 308, 401, 403]
+
     url = f"{scheme}://{domain}/"
     headers = {"User-Agent": user_agent}
     start = time.monotonic()
@@ -103,13 +106,20 @@ def check_single_website(
     dns_ok, ips, dns_err = _check_dns(domain)
 
     exp_json = site.get("expected_status_json")
+    expected: List[int] = []
     if exp_json:
         try:
-            expected = json.loads(exp_json)
+            parsed = json.loads(exp_json)
+            if isinstance(parsed, list):
+                expected = [int(x) for x in parsed if isinstance(x, (int, str)) and str(x).isdigit()]
         except Exception:
-            expected = default_expected
-    else:
-        expected = site.get("expected_status") or default_expected
+            expected = []
+    if not expected:
+        raw_exp = site.get("expected_status")
+        if isinstance(raw_exp, list):
+            expected = [int(x) for x in raw_exp if isinstance(x, (int, str)) and str(x).isdigit()]
+    if not expected:
+        expected = list(default_expected) if default_expected else [200, 201, 204, 301, 302, 307, 308, 401, 403]
 
     http_res = _check_http(domain, "http", timeout, user_agent, expected)
     https_res = _check_http(domain, "https", timeout, user_agent, expected)
