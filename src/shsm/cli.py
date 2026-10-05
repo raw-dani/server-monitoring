@@ -578,20 +578,48 @@ def cmd_report_monthly(click_ctx: click.Context, preview: bool, send: bool) -> N
 
 
 # ---------------------------------------------------------------- database & retention
-@main.group("database")
-def grp_database() -> None:
-    """Database administration."""
+@main.group("db")
+def grp_db() -> None:
+    """Database administration and migrations."""
 
 
-@grp_database.command("backup")
+@grp_db.command("migrate")
 @click.pass_context
-def cmd_database_backup(click_ctx: click.Context) -> None:
+def cmd_db_migrate(click_ctx: click.Context) -> None:
+    """Apply pending database migrations."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    applied = app_ctx.db.migrate()
+    if applied:
+        click.secho(f"Applied migrations: {applied}", fg="green")
+    else:
+        click.secho("Database schema is up to date.", fg="green")
+
+
+@grp_db.command("status")
+@click.pass_context
+def cmd_db_status(click_ctx: click.Context) -> None:
+    """Check database schema version and integrity."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    version = app_ctx.db.current_version()
+    check = app_ctx.db.quick_check()
+    click.echo(f"Database Path:    {app_ctx.db.path}")
+    click.echo(f"Current Version:  {version}")
+    click.echo(f"Integrity Check:  {check}")
+
+
+@grp_db.command("backup")
+@click.pass_context
+def cmd_db_backup(click_ctx: click.Context) -> None:
     """Create a verified consistent SQLite snapshot backup."""
     app_ctx = get_context(click_ctx.obj.get("config_path"))
     from shsm.core.retention import perform_database_backup
 
     dest = perform_database_backup(app_ctx)
     click.secho(f"Database backed up successfully to: {dest}", fg="green")
+
+
+# Alias 'database' to 'db'
+main.add_command(grp_db, "database")
 
 
 @main.group("retention")

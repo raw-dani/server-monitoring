@@ -22,6 +22,7 @@ def test_cli_help():
     assert "websites" in result.output
     assert "wordpress" in result.output
     assert "config" in result.output
+    assert "db" in result.output
 
 
 def test_cli_config_show():
@@ -29,3 +30,15 @@ def test_cli_config_show():
     result = runner.invoke(main, ["config", "show", "--redacted"])
     assert result.exit_code == 0
     assert "general" in result.output
+
+
+def test_cli_db_commands(temp_dir, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setenv("SHSM_PATHS_DATA_DIR", temp_dir)
+    res_migrate = runner.invoke(main, ["db", "migrate"])
+    assert res_migrate.exit_code == 0
+    assert "migrations" in res_migrate.output.lower() or "schema" in res_migrate.output.lower()
+
+    res_status = runner.invoke(main, ["db", "status"])
+    assert res_status.exit_code == 0
+    assert "Integrity Check:  ok" in res_status.output
