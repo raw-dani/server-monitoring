@@ -14,7 +14,16 @@ Security is the primary guiding principle of the SHSM architecture. This documen
 ## 2. Least-Privilege & Non-Root Execution
 
 ### The Dedicated `shsm` User
-SHSM executes under a dedicated system user `shsm`. It does not have interactive login (`/bin/false`).
+SHSM executes under a dedicated system user `shsm:shsm`. It has no interactive login shell (`/bin/false`) and no home directory.
+
+### Sudoers Restrictions (`/etc/sudoers.d/shsm`)
+The `shsm` user is granted limited sudo privileges strictly for:
+- Reading system service states (`systemctl is-active`, `systemctl status`, `systemctl show`, `systemctl list-units`).
+- Reading systemd journal logs (`journalctl`).
+- Querying firewall status (`ufw status`, `firewall-cmd --state`, `iptables -L`).
+- Querying Fail2Ban status (`fail2ban-client status`).
+- Running read-only security scanners (`lynis`, `rkhunter`, `clamscan`).
+- Executing WP-CLI *strictly as the site's Linux owner* (`sudo -u <site-user> wp ...`).
 
 ### WordPress WP-CLI Safety (Never Root)
 Executing WP-CLI as `root` can corrupt file ownership (e.g., creating cache files owned by root inside `/home/user/public_html/`) or trigger malicious code execution with root privileges.
@@ -37,7 +46,16 @@ SHSM enforces redaction at four distinct pipeline boundaries:
 
 ---
 
-## 4. Subprocess Isolation & Safety
+## 4. Secret Storage & File Permissions
+
+Secret files containing database passwords, API tokens, or SMTP passwords:
+- Stored in `/etc/shsm/secrets/`.
+- Must have secure file modes: `0640 root:shsm` (readable only by root and members of the `shsm` group) or `0600`.
+- World-readable or group-writable permissions are strictly rejected during preflight validation (`shsm doctor`).
+
+---
+
+## 5. Subprocess Isolation & Safety
 
 All external commands executed by SHSM adhere to strict rules:
 - **No `shell=True`**: All commands use argument lists (`Sequence[str]`) avoiding shell injection.
@@ -47,7 +65,7 @@ All external commands executed by SHSM adhere to strict rules:
 
 ---
 
-## 5. File Integrity Monitoring (FIM)
+## 6. File Integrity Monitoring (FIM)
 
 SHSM tracks cryptographic SHA-256 hashes, file sizes, permissions, and modification times for critical configuration files:
 - `/etc/passwd`, `/etc/group`, `/etc/shadow`, `/etc/sudoers`, `/etc/sudoers.d/`
@@ -56,3 +74,9 @@ SHSM tracks cryptographic SHA-256 hashes, file sizes, permissions, and modificat
 - `/etc/hosts`, `/etc/fstab`
 
 Deltas trigger high-confidence security findings with previous and new attribute diffs.
+
+### Baseline Maintenance
+When legitimate administrative changes are made to server configuration:
+```bash
+sudo -u shsm shsm integrity baseline --update
+```

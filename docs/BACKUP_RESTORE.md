@@ -6,7 +6,8 @@ SHSM stores all collected metrics, findings, historical rollups, and audit trail
 
 ## 1. Safe SQLite Online Backup API
 
-**Important**: Never copy a live SQLite database file using standard `cp` while transactions may be writing in WAL (Write-Ahead Logging) mode. A raw file copy can capture inconsistent pages and result in database corruption.
+> [!WARNING]
+> Never copy a live SQLite database file using standard `cp` while transactions may be writing in WAL (Write-Ahead Logging) mode. A raw file copy can capture inconsistent pages and result in database corruption.
 
 SHSM uses the native SQLite Online Backup API (`sqlite3_backup_*`), which safely acquires a read-lock, checkpoints memory pages, and streams a 100% consistent copy to disk.
 
@@ -14,26 +15,27 @@ SHSM uses the native SQLite Online Backup API (`sqlite3_backup_*`), which safely
 
 ## 2. Performing a Manual Backup
 
+Run the database backup command as user `shsm`:
 ```bash
-shsm db backup
+sudo -u shsm shsm db backup
 ```
 By default, backups are saved to `/var/lib/shsm/backups/monitoring_<timestamp>.db`.
 
-To specify a custom backup destination:
-```bash
-shsm db backup --dest /mnt/backup-volume/shsm-backup.db
-```
-
 ---
 
-## 3. Automated Backup Schedule & Rotation
+## 3. Automated Backup Schedule & Retention
 
 - The systemd timer `shsm-retention.timer` executes daily at 03:00.
 - During retention execution, SHSM:
-  1. Computes hourly and daily rollups.
+  1. Computes hourly and daily metric rollups.
   2. Purges raw metric samples older than `data_retention_days` (default 365 days).
   3. Creates an online atomic backup into `/var/lib/shsm/backups/`.
-  4. Rotates old backup files, retaining the last 14 backups.
+  4. Automatically rotates old backup files, retaining the last 14 backups.
+
+To manually trigger the retention and backup routine:
+```bash
+sudo -u shsm shsm retention run
+```
 
 ---
 
@@ -41,12 +43,11 @@ shsm db backup --dest /mnt/backup-volume/shsm-backup.db
 
 To test database integrity and verify that tables and indexes are free of corruption:
 ```bash
-shsm db status
+sudo -u shsm shsm db status
 ```
 This runs:
 - `PRAGMA quick_check`
-- `PRAGMA foreign_key_check`
-- Inspects database page size, WAL file presence, and latest schema version.
+- Inspects database page size, WAL file status, and applied migration schema version.
 
 ---
 
@@ -68,7 +69,11 @@ sudo rm -f /var/lib/shsm/monitoring.db-wal /var/lib/shsm/monitoring.db-shm
 
 ### Step 3: Restore from Backup
 ```bash
-sudo cp /var/lib/shsm/backups/monitoring_20261001_030000.db /var/lib/shsm/monitoring.db
+# Locate your latest backup
+ls -lt /var/lib/shsm/backups/
+
+# Copy the chosen backup file
+sudo cp /var/lib/shsm/backups/monitoring_<timestamp>.db /var/lib/shsm/monitoring.db
 sudo chown shsm:shsm /var/lib/shsm/monitoring.db
 sudo chmod 0660 /var/lib/shsm/monitoring.db
 ```

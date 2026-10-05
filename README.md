@@ -120,18 +120,23 @@ d:/Server/server-monitoring/
 
 | Command | Description |
 | :--- | :--- |
-| `shsm status` | Display server health, security scores, subsystems, and active findings |
-| `shsm doctor` | Run comprehensive system diagnostic checks |
-| `shsm health run` | Execute system health metrics collection and evaluate thresholds |
-| `shsm security audit` | Execute quick security scans across SSH, firewall, and files |
-| `shsm security scan-full` | Run comprehensive weekly deep security audit (ClamAV, Rootkits, FIM) |
-| `shsm websites list` | List discovered CyberPanel vhosts, docroots, owners, and SSL status |
-| `shsm wordpress audit` | Audit WordPress installations (checksums, plugins, admin discovery) |
-| `shsm report weekly --send` | Generate weekly HTML & ReportLab PDF report and dispatch via email |
-| `shsm report monthly --send` | Generate monthly executive PDF report and dispatch via email |
-| `shsm findings list` | View active and historical security and health findings |
-| `shsm db backup` | Create atomic, consistent online SQLite backup |
-| `shsm schedule status` | Inspect state of all 21 systemd timers |
+| `sudo -u shsm shsm status` | Display server health, security scores, subsystems, and active findings |
+| `sudo -u shsm shsm doctor` | Run comprehensive system diagnostic checks |
+| `sudo -u shsm shsm collect health` | Collect CPU, RAM, swap, and disk metrics |
+| `sudo -u shsm shsm collect services` | Check OpenLiteSpeed, MariaDB, Redis, SSH, Cron, and failed units |
+| `sudo -u shsm shsm collect databases` | Collect MariaDB uptime, connection rates, slow queries, and Redis metrics |
+| `sudo -u shsm shsm security audit` | Execute security scans across SSH config/logs, firewall, and Fail2Ban |
+| `sudo -u shsm shsm security scan --profile quick` | Run fast heuristic malware scans on uploads and executable PHP scripts |
+| `sudo -u shsm shsm security scan --profile full` | Run comprehensive deep security scan (ClamAV, Rootkits, Lynis) |
+| `sudo -u shsm shsm websites discover` | Discover websites from CyberPanel database, OLS vhosts, and `/home` |
+| `sudo -u shsm shsm websites check` | Check website DNS, HTTP response times, and SSL certificate expiration |
+| `sudo -u shsm shsm wordpress audit` | Audit WordPress core integrity, plugins, themes, and administrators |
+| `sudo -u shsm shsm findings list` | View active open security and health findings |
+| `sudo -u shsm shsm findings resolve <uid>` | Mark an issue as resolved (or `all-malware` / `all`) |
+| `sudo -u shsm shsm integrity baseline --update` | Update cryptographic baseline for monitored system files (FIM) |
+| `sudo -u shsm shsm report weekly --send` | Generate weekly HTML & ReportLab PDF report and dispatch via email |
+| `sudo -u shsm shsm db backup` | Create atomic, consistent online SQLite backup |
+| `systemctl list-timers 'shsm-*'` | Inspect state of all 21 systemd timers |
 
 ---
 
