@@ -49,3 +49,26 @@ def test_alert_manager_suppresses_low_severities(test_db, sample_config):
     manager.process_findings([f], resolved_finding_ids=[])
     alert_record = ctx.alerts.get(f.fingerprint)
     assert alert_record is None
+
+
+def test_email_presets_resolution():
+    from shsm.notifications.smtp import EMAIL_PRESETS
+
+    assert "brevo" in EMAIL_PRESETS
+    assert EMAIL_PRESETS["brevo"]["smtp_host"] == "smtp-relay.brevo.com"
+    assert EMAIL_PRESETS["brevo"]["smtp_port"] == 587
+
+    assert "mailtrap" in EMAIL_PRESETS
+    assert EMAIL_PRESETS["mailtrap"]["smtp_host"] == "live.smtp.mailtrap.io"
+
+    assert "mailtrap_sandbox" in EMAIL_PRESETS
+    assert EMAIL_PRESETS["mailtrap_sandbox"]["smtp_host"] == "sandbox.smtp.mailtrap.io"
+    assert EMAIL_PRESETS["mailtrap_sandbox"]["smtp_port"] == 2525
+
+    assert "sendgrid" in EMAIL_PRESETS
+    assert EMAIL_PRESETS["sendgrid"]["smtp_host"] == "smtp.sendgrid.net"
+    assert EMAIL_PRESETS["sendgrid"]["username"] == "apikey"
+
+    assert "local" in EMAIL_PRESETS
+    assert EMAIL_PRESETS["local"]["security"] == "none"
+

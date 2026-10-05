@@ -45,6 +45,7 @@ DEFAULTS: Dict[str, Any] = {
     },
     "email": {
         "enabled": True,
+        "provider": "custom",
         "smtp_host": "smtp.gmail.com",
         "smtp_port": 587,
         "security": "starttls",
@@ -306,6 +307,7 @@ _RULES: List[Tuple[str, str, Optional[float], Optional[float], Optional[tuple]]]
     ("general.read_only", "bool", None, None, None),
     ("general.data_retention_days", "int", 1, 3650, None),
     ("email.enabled", "bool", None, None, None),
+    ("email.provider", "str", None, None, ("custom", "gmail", "brevo", "mailtrap", "mailtrap_sandbox", "sendgrid", "mailgun", "postmark", "ses", "local")),
     ("email.smtp_port", "int", 1, 65535, None),
     ("email.security", "str", None, None, ("starttls", "ssl", "none")),
     ("email.timeout_seconds", "int", 1, 300, None),

@@ -44,21 +44,80 @@ paths:
 ```
 
 ### Email & Notifications
+
+SHSM supports flexible email delivery through any SMTP provider using presets or custom host configurations:
+
 ```yaml
 email:
   enabled: true
-  smtp_host: "smtp.gmail.com"
-  smtp_port: 587
-  security: "starttls"              # starttls, ssl, none
-  username: "monitoring@example.com"
+  # Provider preset: custom | brevo | mailtrap | mailtrap_sandbox | sendgrid | mailgun | postmark | gmail | local
+  provider: "brevo"
+  smtp_host: "smtp-relay.brevo.com"   # Optional if provider is set; required if provider: "custom"
+  smtp_port: 587                      # 587 (STARTTLS), 465 (SSL), 2525 (Mailtrap Sandbox), 25 (local)
+  security: "starttls"                # starttls, ssl, none
+  username: "your-account@domain.com" # Login username / 'apikey' for SendGrid
   password_file: "/etc/shsm/secrets/smtp_password" # Or SHSM_SMTP_PASSWORD env var
   from_name: "GM Teknologi Server Monitor"
-  from_address: "monitoring@example.com"
+  from_address: "alerts@yourdomain.com" # Sender address (required by SendGrid/Brevo/Mailtrap)
   recipients:
     - "rohmataliwardani@gmail.com"
   timeout_seconds: 20
   retries: 3
 ```
+
+#### Provider Quick Setup Examples:
+
+1. **Brevo (Sendinblue)**:
+   ```yaml
+   email:
+     provider: "brevo"
+     username: "your-brevo-login@domain.com"
+     from_address: "alerts@yourdomain.com" # Must be a verified sender in Brevo
+   ```
+   *Store your Brevo SMTP Master Key (`xsmtpib-...`) in `/etc/shsm/secrets/smtp_password`.*
+
+2. **Mailtrap (Production Email Sending)**:
+   ```yaml
+   email:
+     provider: "mailtrap"
+     username: "api"
+     from_address: "alerts@your-verified-domain.com"
+   ```
+   *Store your Mailtrap API token in `/etc/shsm/secrets/smtp_password`.*
+
+3. **Mailtrap (Testing Sandbox)**:
+   ```yaml
+   email:
+     provider: "mailtrap_sandbox"
+     username: "<your_mailtrap_sandbox_username>"
+     from_address: "test@example.com"
+   ```
+   *Store your Mailtrap sandbox password in `/etc/shsm/secrets/smtp_password`.*
+
+4. **SendGrid**:
+   ```yaml
+   email:
+     provider: "sendgrid"
+     username: "apikey"
+     from_address: "alerts@your-verified-domain.com"
+   ```
+   *Store your SendGrid API Key (`SG.xxx`) in `/etc/shsm/secrets/smtp_password`.*
+
+5. **Gmail**:
+   ```yaml
+   email:
+     provider: "gmail"
+     username: "your-email@gmail.com"
+     from_address: "your-email@gmail.com"
+   ```
+   *Store your 16-character Google App Password in `/etc/shsm/secrets/smtp_password`.*
+
+6. **Local Postfix / Exim (CyberPanel Local Mail)**:
+   ```yaml
+   email:
+     provider: "local"
+     from_address: "shsm@yourdomain.com"
+   ```
 
 ### Alerting Rules & Thresholds
 ```yaml

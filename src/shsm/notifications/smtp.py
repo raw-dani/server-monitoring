@@ -5,14 +5,63 @@ from __future__ import annotations
 import email.encoders
 import os
 import smtplib
+import socket
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from shsm.core.context import Context
 from shsm.utils.redact import redact
 from shsm.utils.retry import retry_call
+
+EMAIL_PRESETS: Dict[str, Dict[str, Any]] = {
+    "gmail": {
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "security": "starttls",
+    },
+    "brevo": {
+        "smtp_host": "smtp-relay.brevo.com",
+        "smtp_port": 587,
+        "security": "starttls",
+    },
+    "mailtrap": {
+        "smtp_host": "live.smtp.mailtrap.io",
+        "smtp_port": 587,
+        "security": "starttls",
+    },
+    "mailtrap_sandbox": {
+        "smtp_host": "sandbox.smtp.mailtrap.io",
+        "smtp_port": 2525,
+        "security": "starttls",
+    },
+    "sendgrid": {
+        "smtp_host": "smtp.sendgrid.net",
+        "smtp_port": 587,
+        "security": "starttls",
+        "username": "apikey",
+    },
+    "mailgun": {
+        "smtp_host": "smtp.mailgun.org",
+        "smtp_port": 587,
+        "security": "starttls",
+    },
+    "postmark": {
+        "smtp_host": "smtp.postmarkapp.com",
+        "smtp_port": 587,
+        "security": "starttls",
+    },
+    "ses": {
+        "smtp_port": 587,
+        "security": "starttls",
+    },
+    "local": {
+        "smtp_host": "127.0.0.1",
+        "smtp_port": 25,
+        "security": "none",
+    },
+}
 
 
 class SMTPTransport:
@@ -33,13 +82,23 @@ class SMTPTransport:
         if not cfg.get("enabled", True):
             return False, 0, "Email is disabled in configuration"
 
-        host = str(cfg.get("smtp_host", "localhost"))
-        port = int(cfg.get("smtp_port", 587))
-        sec = str(cfg.get("security", "starttls")).lower()
-        user = str(cfg.get("username", ""))
+        provider = str(cfg.get("provider", "custom")).lower()
+        preset = EMAIL_PRESETS.get(provider, {})
+
+        host = str(cfg.get("smtp_host") or preset.get("smtp_host") or "localhost")
+        port = int(cfg.get("smtp_port") or preset.get("smtp_port") or 587)
+        sec = str(cfg.get("security") or preset.get("security") or "starttls").lower()
+        user = str(cfg.get("username") or preset.get("username") or "")
         password = self.config.secret("smtp_password")
 
-        from_addr = str(cfg.get("from_address") or user)
+        configured_from = cfg.get("from_address")
+        if configured_from:
+            from_addr = str(configured_from)
+        elif user and "@" in user:
+            from_addr = user
+        else:
+            from_addr = f"shsm@{socket.getfqdn()}"
+
         from_name = str(cfg.get("from_name", "GM Teknologi Server Monitor"))
         target_recipients = list(recipients or cfg.get("recipients", ["rohmataliwardani@gmail.com"]))
 

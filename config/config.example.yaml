@@ -15,23 +15,72 @@ paths:
   report_dir: /var/lib/shsm/reports   # Generated HTML and PDF reports
   cache_dir: /var/cache/shsm          # Temporary cache
   rules_dir: /etc/shsm/rules          # Custom scanning rule definitions
-  lock_dir: /run/shsm                 # Inter-process job locks
+  lock_dir: /var/lib/shsm/locks       # Inter-process job locks (persistent, owned by shsm:shsm)
 
 email:
   enabled: true
-  smtp_host: smtp.gmail.com
-  smtp_port: 587
-  security: starttls                  # starttls, ssl, or none (none only allowed for localhost)
-  username: ""                        # SMTP username / Gmail account
-  password_file: /etc/shsm/secrets/smtp_password  # Mode 0600 root-owned secret file
+  # Email provider preset: custom | brevo | mailtrap | mailtrap_sandbox | sendgrid | mailgun | postmark | gmail | local
+  # Using a preset automatically configures standard smtp_host, smtp_port, and security settings.
+  provider: custom
+
+  # Connection settings (Overrides preset defaults if specified)
+  smtp_host: smtp.gmail.com           # e.g., smtp-relay.brevo.com, live.smtp.mailtrap.io, smtp.sendgrid.net
+  smtp_port: 587                      # 587 (STARTTLS), 465 (SSL), 2525 (Mailtrap), 25 (local)
+  security: starttls                  # starttls, ssl, or none
+
+  # Authentication
+  username: ""                        # e.g., Brevo email, 'apikey' for SendGrid, or Gmail address
+  password_file: /etc/shsm/secrets/smtp_password  # Secret file (0640 root:shsm) containing password / API key
+
+  # Sender and Recipients
   from_name: GM Teknologi Server Monitor
-  from_address: ""                    # Defaults to username if omitted
+  from_address: ""                    # e.g. alerts@yourdomain.com (Required by SendGrid/Brevo/Mailtrap)
   recipients:
     - rohmataliwardani@gmail.com
+
+  # Reliability & Retries
   timeout_seconds: 20
   retries: 3
   retry_base_delay_seconds: 2
   retry_max_delay_seconds: 60
+
+  # -------------------------------------------------------------
+  # Common Provider Quick Configurations:
+  #
+  # 1. Brevo (Sendinblue):
+  #    provider: brevo
+  #    username: your-brevo-account@example.com
+  #    from_address: verified-sender@yourdomain.com
+  #    # In /etc/shsm/secrets/smtp_password: your Brevo SMTP Master Key (xsmtpib-...)
+  #
+  # 2. Mailtrap (Production Email Sending):
+  #    provider: mailtrap
+  #    username: api
+  #    from_address: alerts@your-verified-domain.com
+  #    # In /etc/shsm/secrets/smtp_password: your Mailtrap API token
+  #
+  # 3. Mailtrap (Testing Sandbox):
+  #    provider: mailtrap_sandbox
+  #    username: <your_sandbox_username>
+  #    from_address: test@example.com
+  #    # In /etc/shsm/secrets/smtp_password: your Mailtrap sandbox password
+  #
+  # 4. SendGrid:
+  #    provider: sendgrid
+  #    username: apikey
+  #    from_address: verified-sender@yourdomain.com
+  #    # In /etc/shsm/secrets/smtp_password: your SendGrid API key (SG.xxx)
+  #
+  # 5. Gmail:
+  #    provider: gmail
+  #    username: your-email@gmail.com
+  #    from_address: your-email@gmail.com
+  #    # In /etc/shsm/secrets/smtp_password: your 16-character Google App Password
+  #
+  # 6. Local Postfix / Exim:
+  #    provider: local
+  #    from_address: shsm@yourdomain.com
+  # -------------------------------------------------------------
 
 schedule:
   timezone: Asia/Jakarta
