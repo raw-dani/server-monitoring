@@ -171,8 +171,32 @@ sudo -u shsm shsm integrity check
 
 ## 7. Notifikasi Email, Alert & External Heartbeat
 
+### Mengonfigurasi & Mengganti Provider Email
+SHSM mendukung preset email siap pakai (`brevo`, `mailtrap`, `mailtrap_sandbox`, `sendgrid`, `mailgun`, `postmark`, `gmail`, `local`, `custom`).
+
+1. Buka konfigurasi:
+   ```bash
+   sudo nano /etc/shsm/config.yaml
+   ```
+2. Sesuaikan blok `email:` (misalnya Brevo, Mailtrap, atau SendGrid):
+   ```yaml
+   email:
+     enabled: true
+     provider: brevo
+     username: "akun-anda@example.com"
+     from_address: "alerts@domain-anda.com"
+     recipients:
+       - "rohmataliwardani@gmail.com"
+   ```
+3. Simpan password atau API key penyedia email Anda:
+   ```bash
+   echo "API_KEY_ATAU_PASSWORD" | sudo tee /etc/shsm/secrets/smtp_password
+   sudo chown root:shsm /etc/shsm/secrets/smtp_password
+   sudo chmod 0640 /etc/shsm/secrets/smtp_password
+   ```
+
 ### Menguji Pengiriman Email Notifikasi SMTP
-Mengirimkan email uji coba ke daftar penerima yang dikonfigurasi:
+Mengirimkan email uji coba ke daftar penerima yang dikonfigurasi untuk memverifikasi koneksi dan kredensial:
 ```bash
 sudo -u shsm shsm email test
 ```

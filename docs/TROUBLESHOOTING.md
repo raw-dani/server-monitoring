@@ -124,18 +124,32 @@ sudo -u shsm shsm doctor
 
 ---
 
-### G. Gagal Mengirim Email Alert (SMTP Authentication Error)
-- **Gejala**: Log mencatat `smtplib.SMTPAuthenticationError`.
-- **Penyebab**: Password akun email salah atau akun Gmail memerlukan **App Password** (Sandi Aplikasi).
-- **Solusi**:
-  1. Untuk Gmail / Google Workspace, aktifkan 2-Step Verification dan buat **App Password** 16 karakter.
-  2. Simpan sandi ke `/etc/shsm/secrets/smtp_password`:
+### G. Gagal Mengirim Email Alert (SMTP / Authentication Error)
+- **Gejala**: Log mencatat `smtplib.SMTPAuthenticationError`, `535 Authentication failed`, atau `550 The from address does not match a verified Sender Identity`.
+- **Penyebab & Solusi per Provider**:
+  1. **Brevo (Sendinblue)**:
+     - *Error 535*: Pastikan password yang disimpan di `/etc/shsm/secrets/smtp_password` adalah **SMTP Master Key** (awalan `xsmtpib-...`), bukan password login web dashboard biasa.
+     - *Error Sender*: Pastikan `from_address` di `/etc/shsm/config.yaml` sudah terdaftar dan terverifikasi di menu *Senders & IPs* akun Brevo Anda.
+  2. **Mailtrap**:
+     - *Production (`provider: mailtrap`)*: Gunakan `username: "api"` dan API token resmi dari Mailtrap Email Sending, serta pastikan domain pengirim (`from_address`) sudah diverifikasi DNS-nya.
+     - *Sandbox Testing (`provider: mailtrap_sandbox`)*: Gunakan username & password inbox sandbox Anda. Sandbox tidak memerlukan verifikasi domain pengirim.
+  3. **SendGrid**:
+     - *Error 535*: Username harus berupa string `apikey` (huruf kecil semua) dan password adalah SendGrid API Key berawalan `SG.xxx`.
+     - *Error 550 Sender Identity*: Alamat `from_address` wajib terdaftar di *Single Sender Verification* atau *Domain Authentication* SendGrid.
+  4. **Gmail / Google Workspace**:
+     - *Error 535 5.7.8*: Gmail tidak mengizinkan password akun biasa. Wajib aktifkan *2-Step Verification* di akun Google dan buat **App Password** (Sandi Aplikasi) 16 karakter.
+  5. **Local Postfix / Exim**:
+     - Pastikan service lokal aktif (`systemctl status postfix` atau `systemctl status exim4`).
+     - Gunakan `provider: local` (port 25 tanpa autentikasi).
+
+- **Langkah Menyimpan Password & Pengujian**:
+  1. Simpan password/API key dengan izin aman:
      ```bash
-     echo "your-16-char-app-password" | sudo tee /etc/shsm/secrets/smtp_password
+     echo "API_KEY_ATAU_PASSWORD" | sudo tee /etc/shsm/secrets/smtp_password
      sudo chown root:shsm /etc/shsm/secrets/smtp_password
      sudo chmod 0640 /etc/shsm/secrets/smtp_password
      ```
-  3. Uji pengiriman email:
+  2. Uji coba pengiriman:
      ```bash
      sudo -u shsm shsm email test
      ```

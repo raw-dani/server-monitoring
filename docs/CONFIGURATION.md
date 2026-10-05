@@ -119,6 +119,41 @@ email:
      from_address: "shsm@yourdomain.com"
    ```
 
+7. **Mailgun**:
+   ```yaml
+   email:
+     provider: "mailgun"
+     username: "postmaster@your-domain.com"
+     from_address: "alerts@your-domain.com"
+   ```
+   *Store your Mailgun SMTP password in `/etc/shsm/secrets/smtp_password`.*
+
+8. **Amazon SES**:
+   ```yaml
+   email:
+     provider: "ses"
+     smtp_host: "email-smtp.us-east-1.amazonaws.com" # Sesuaikan region AWS Anda
+     username: "AKIAIOSFODNN7EXAMPLE"                # SES SMTP Username
+     from_address: "alerts@your-verified-domain.com"
+   ```
+   *Store your Amazon SES SMTP password in `/etc/shsm/secrets/smtp_password`.*
+
+9. **Postmark**:
+   ```yaml
+   email:
+     provider: "postmark"
+     username: "your-postmark-server-api-token"
+     from_address: "alerts@yourdomain.com"
+   ```
+   *Store your Postmark Server API Token in `/etc/shsm/secrets/smtp_password`.*
+
+> [!NOTE]
+> Setelah menyimpan password/API key ke file `/etc/shsm/secrets/smtp_password`, pastikan hak aksesnya aman:
+> ```bash
+> sudo chown root:shsm /etc/shsm/secrets/smtp_password
+> sudo chmod 0640 /etc/shsm/secrets/smtp_password
+> ```
+
 ### Alerting Rules & Thresholds
 ```yaml
 alerts:
