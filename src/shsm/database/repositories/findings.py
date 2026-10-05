@@ -90,6 +90,23 @@ class FindingsRepo:
                 resolved.append(int(r["id"]))
         return resolved
 
+    def resolve_by_asset(self, asset: str, check_ids: Iterable[str], now: datetime) -> List[int]:
+        resolved: List[int] = []
+        ts = to_iso(now)
+        for check_id in check_ids:
+            rows = self.db.query(
+                "SELECT id FROM findings WHERE status IN ('OPEN','ACKNOWLEDGED','SUPPRESSED') "
+                "AND check_id=? AND asset=?",
+                (check_id, asset),
+            )
+            for r in rows:
+                self.db.execute(
+                    "UPDATE findings SET status='RESOLVED', resolved_at=?, status_changed_at=? WHERE id=?",
+                    (ts, ts, r["id"]),
+                )
+                resolved.append(int(r["id"]))
+        return resolved
+
     def resolve_missing(self, prefixes: Iterable[str], seen: Set[str], now: datetime) -> List[int]:
         resolved: List[int] = []
         ts = to_iso(now)

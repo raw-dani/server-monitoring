@@ -28,15 +28,36 @@ class IntegrityRepo:
 
     def upsert_baseline(self, rec: Dict[str, Any], now: datetime) -> None:
         ts = to_iso(now)
-        self.db.execute(
-            "INSERT INTO integrity_baseline (path, file_type, sha256, size, uid, gid, mode, mtime, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET file_type=excluded.file_type, sha256=excluded.sha256, "
-            "size=excluded.size, uid=excluded.uid, gid=excluded.gid, mode=excluded.mode, mtime=excluded.mtime, updated_at=excluded.updated_at",
-            (rec["path"], rec["file_type"], rec.get("sha256"), rec.get("size"), rec.get("uid"), rec.get("gid"),
-             rec.get("mode"), rec.get("mtime"), ts, ts))
+        meta = rec.get("metadata_json")
+        if isinstance(meta, (dict, list)):
+            meta = json.dumps(meta)
+        try:
+            self.db.execute(
+                "INSERT INTO integrity_baseline (path, file_type, sha256, size, uid, gid, mode, mtime, metadata_json, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET file_type=excluded.file_type, sha256=excluded.sha256, "
+                "size=excluded.size, uid=excluded.uid, gid=excluded.gid, mode=excluded.mode, mtime=excluded.mtime, "
+                "metadata_json=excluded.metadata_json, updated_at=excluded.updated_at",
+                (rec["path"], rec["file_type"], rec.get("sha256"), rec.get("size"), rec.get("uid"), rec.get("gid"),
+                 rec.get("mode"), rec.get("mtime"), meta, ts, ts))
+        except Exception:
+            # Fallback if metadata_json column is not present in legacy un-migrated tables
+            self.db.execute(
+                "INSERT INTO integrity_baseline (path, file_type, sha256, size, uid, gid, mode, mtime, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET file_type=excluded.file_type, sha256=excluded.sha256, "
+                "size=excluded.size, uid=excluded.uid, gid=excluded.gid, mode=excluded.mode, mtime=excluded.mtime, updated_at=excluded.updated_at",
+                (rec["path"], rec["file_type"], rec.get("sha256"), rec.get("size"), rec.get("uid"), rec.get("gid"),
+                 rec.get("mode"), rec.get("mtime"), ts, ts))
 
     def delete_baseline(self, path: str) -> None:
         self.db.execute("DELETE FROM integrity_baseline WHERE path=?", (path,))
+
+    def resolve_open_events_for_path(self, path: str, now: datetime) -> int:
+        ts = to_iso(now)
+        cur = self.db.execute(
+            "UPDATE integrity_events SET status='RESOLVED', resolved_at=? WHERE path=? AND status='OPEN'",
+            (ts, path),
+        )
+        return int(cur.rowcount or 0)
 
     def open_events(self) -> List[Dict[str, Any]]:
         return [dict(r) for r in self.db.query("SELECT * FROM integrity_events WHERE status='OPEN' ORDER BY detected_at, path")]
@@ -47,11 +68,19 @@ class IntegrityRepo:
         return dict(row) if row else None
 
     def add_event(self, path: str, change_type: str, severity: str, old: Any, new: Any, now: datetime) -> int:
+        existing = self.find_open_event(path, change_type)
+        if existing:
+            self.touch_event(int(existing["id"]), new, now)
+            return int(existing["id"])
+
         ts = to_iso(now)
         cur = self.db.execute(
             "INSERT INTO integrity_events (path, change_type, severity, old_json, new_json, detected_at, last_seen_at) "
-            "VALUES (?,?,?,?,?,?,?)", (path, change_type, severity, json.dumps(old, default=str), json.dumps(new, default=str), ts, ts))
-        return int(cur.lastrowid or 0)
+            "VALUES (?,?,?,?,?,?,?) ON CONFLICT(path, change_type, detected_at) DO UPDATE SET last_seen_at=excluded.last_seen_at, "
+            "new_json=excluded.new_json",
+            (path, change_type, severity, json.dumps(old, default=str), json.dumps(new, default=str), ts, ts),
+        )
+        return int(cur.lastrowid or (existing["id"] if existing else 0))
 
     def touch_event(self, event_id: int, new: Any, now: datetime) -> None:
         self.db.execute("UPDATE integrity_events SET last_seen_at=?, new_json=? WHERE id=?",

@@ -51,3 +51,8 @@ def test_foreign_keys_and_quick_check(test_db):
 def test_migration_is_idempotent(test_db):
     applied = test_db.migrate()
     assert len(applied) == 0
+
+
+def test_integrity_baseline_has_metadata_column(test_db):
+    cols = [r["name"] for r in test_db.query("PRAGMA table_info(integrity_baseline)")]
+    assert "metadata_json" in cols

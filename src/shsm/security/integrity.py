@@ -50,10 +50,28 @@ def inspect_path(path: str, max_size: int = 50 * 1024 * 1024) -> Optional[Dict[s
         sha = None
 
     import datetime
+    import json
 
     from shsm.core.timeutils import UTC
+    from shsm.security import accounts
 
     mtime_dt = datetime.datetime.fromtimestamp(st.st_mtime, tz=UTC)
+
+    meta_json: Optional[str] = None
+    if ftype == "file":
+        norm = path.replace("\\", "/")
+        if norm.endswith("/etc/passwd"):
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    meta_json = json.dumps(accounts.parse_passwd_content(fh.read()))
+            except OSError:
+                pass
+        elif norm.endswith("/etc/group"):
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    meta_json = json.dumps(accounts.parse_group_content(fh.read()))
+            except OSError:
+                pass
 
     return {
         "path": path,
@@ -64,6 +82,7 @@ def inspect_path(path: str, max_size: int = 50 * 1024 * 1024) -> Optional[Dict[s
         "gid": st.st_gid,
         "mode": stat.S_IMODE(st.st_mode),
         "mtime": to_iso(mtime_dt),
+        "metadata_json": meta_json,
     }
 
 
@@ -106,6 +125,12 @@ def build_or_update_baseline(ctx: Context, paths: Optional[Set[str]] = None) -> 
             rec = inspect_path(p, max_size)
             if rec:
                 ctx.integrity.upsert_baseline(rec, now)
+                ctx.integrity.resolve_open_events_for_path(p, now)
+                ctx.findings.resolve_by_asset(
+                    p,
+                    ["integrity.modified", "integrity.deleted", "integrity.permissions", "integrity.new_file", "integrity.accounts"],
+                    now,
+                )
                 count += 1
     return count
 
@@ -125,11 +150,24 @@ def check(ctx: Context) -> CollectorOutput:
         )
         return out
 
+    out.scope("integrity.modified")
+    out.scope("integrity.deleted")
+    out.scope("integrity.permissions")
+    out.scope("integrity.new_file")
+    out.scope("integrity.accounts")
+    out.scope("integrity.files")
+
     max_size = int(ctx.config.get("integrity.max_file_size_mb", 50)) * 1024 * 1024
     current_paths = expand_monitored_paths(ctx)
     critical_paths = set(ctx.config.get("integrity.critical_paths", []))
 
-    changes_detected = 0
+    critical_changes = 0
+    warning_changes = 0
+    info_changes = 0
+
+    import json
+
+    from shsm.security import accounts
 
     # 1. Check existing baseline items for modification or deletion
     for path, b in baseline.items():
@@ -139,7 +177,8 @@ def check(ctx: Context) -> CollectorOutput:
 
         if not curr:
             # File deleted
-            changes_detected += 1
+            critical_changes += 1 if is_critical else 0
+            warning_changes += 0 if is_critical else 1
             ctx.integrity.add_event(path, "DELETED", base_sev.value, b, None, now)
             out.finding(
                 "integrity.deleted",
@@ -157,24 +196,86 @@ def check(ctx: Context) -> CollectorOutput:
 
         # Check content changes
         if b["sha256"] and curr["sha256"] and b["sha256"] != curr["sha256"]:
-            changes_detected += 1
-            ctx.integrity.add_event(path, "CONTENT_MODIFIED", base_sev.value, b, curr, now)
-            out.finding(
-                "integrity.modified",
-                CATEGORY,
-                base_sev,
-                Confidence.CONFIRMED,
-                f"Critical system file modified: {path}",
-                f"Hash changed on {path} (old: {b['sha256'][:8]}..., new: {curr['sha256'][:8]}...).",
-                "Review diff or package status ('dpkg -S' or 'debsums'). Verify unauthorized modifications.",
-                asset=path,
-                source=SOURCE,
-                key=f"{path}:content",
-            )
+            norm = path.replace("\\", "/")
+            if norm.endswith("/etc/passwd") or norm.endswith("/etc/group"):
+                # Structural account & group diffing
+                old_meta_raw = b.get("metadata_json")
+                curr_meta_raw = curr.get("metadata_json")
+
+                if norm.endswith("/etc/passwd"):
+                    old_users = json.loads(old_meta_raw) if old_meta_raw else {}
+                    new_users = json.loads(curr_meta_raw) if curr_meta_raw else {}
+                    acc_events = accounts.diff_passwd(old_users, new_users, ctx=ctx)
+                else:
+                    old_groups = json.loads(old_meta_raw) if old_meta_raw else {}
+                    new_groups = json.loads(curr_meta_raw) if curr_meta_raw else {}
+                    acc_events = accounts.diff_group(old_groups, new_groups, ctx=ctx)
+
+                if not acc_events:
+                    # Whitespace / comment change only
+                    info_changes += 1
+                    ctx.integrity.add_event(path, "CONTENT_MODIFIED", Severity.INFO.value, b, curr, now)
+                    out.finding(
+                        "integrity.accounts",
+                        CATEGORY,
+                        Severity.INFO,
+                        Confidence.CONFIRMED,
+                        f"Non-structural modification in {path}",
+                        f"Hash changed on {path}, but account and group definitions remained identical.",
+                        "Update baseline with 'sudo -u shsm shsm integrity baseline --update'.",
+                        asset=path,
+                        source=SOURCE,
+                        key=f"{path}:structure_clean",
+                    )
+                else:
+                    all_sys_only = all(e.get("is_system_only", False) for e in acc_events)
+                    has_crit = any(e.get("severity") == Severity.CRITICAL for e in acc_events)
+
+                    if has_crit:
+                        critical_changes += 1
+                    elif not all_sys_only:
+                        warning_changes += 1
+                    else:
+                        info_changes += 1
+
+                    for ev in acc_events:
+                        ctx.integrity.add_event(path, ev["event_type"], ev["severity"].value, b, curr, now)
+                        out.finding(
+                            "integrity.accounts",
+                            CATEGORY,
+                            ev["severity"],
+                            Confidence.CONFIRMED,
+                            ev["title"],
+                            ev["details"],
+                            ev["recommendation"],
+                            asset=path,
+                            source=SOURCE,
+                            key=f"{path}:{ev['name']}:{ev['event_type']}",
+                        )
+            else:
+                # Regular system / binary file modification
+                if is_critical:
+                    critical_changes += 1
+                else:
+                    warning_changes += 1
+
+                ctx.integrity.add_event(path, "CONTENT_MODIFIED", base_sev.value, b, curr, now)
+                out.finding(
+                    "integrity.modified",
+                    CATEGORY,
+                    base_sev,
+                    Confidence.CONFIRMED,
+                    f"Critical system file modified: {path}",
+                    f"Hash changed on {path} (old: {b['sha256'][:8]}..., new: {curr['sha256'][:8]}...).",
+                    "Review diff or package status ('dpkg -S' or 'debsums'). Verify unauthorized modifications.",
+                    asset=path,
+                    source=SOURCE,
+                    key=f"{path}:content",
+                )
 
         # Check permissions / owner changes
         elif b["mode"] != curr["mode"] or b["uid"] != curr["uid"] or b["gid"] != curr["gid"]:
-            changes_detected += 1
+            warning_changes += 1
             ctx.integrity.add_event(path, "PERMISSIONS_CHANGED", Severity.HIGH.value, b, curr, now)
             out.finding(
                 "integrity.permissions",
@@ -195,8 +296,12 @@ def check(ctx: Context) -> CollectorOutput:
             curr = inspect_path(path, max_size)
             if not curr:
                 continue
-            changes_detected += 1
             is_critical = any(path == c or path.startswith(c.rstrip("/") + "/") for c in critical_paths)
+            if is_critical:
+                critical_changes += 1
+            else:
+                warning_changes += 1
+
             sev = Severity.HIGH if is_critical else Severity.MEDIUM
             ctx.integrity.add_event(path, "NEW_FILE", sev.value, None, curr, now)
             out.finding(
@@ -212,14 +317,33 @@ def check(ctx: Context) -> CollectorOutput:
                 key=f"{path}:new",
             )
 
-    out.metric("integrity.changes_detected", changes_detected)
+    total_changes = critical_changes + warning_changes + info_changes
+    out.metric("integrity.changes_detected", total_changes)
+    out.metric("integrity.critical_changes", critical_changes)
+    out.metric("integrity.info_changes", info_changes)
 
-    if changes_detected:
+    if critical_changes > 0:
         out.check(
             "integrity.files",
             CATEGORY,
             CheckStatus.CRITICAL,
-            f"Detected {changes_detected} integrity change(s) against baseline ({len(baseline)} files monitored)",
+            f"Detected {critical_changes} critical integrity violation(s) against baseline ({len(baseline)} files monitored)",
+            source=SOURCE,
+        )
+    elif warning_changes > 0:
+        out.check(
+            "integrity.files",
+            CATEGORY,
+            CheckStatus.WARNING,
+            f"Detected {warning_changes} unconfirmed file modification(s) against baseline ({len(baseline)} files monitored)",
+            source=SOURCE,
+        )
+    elif info_changes > 0:
+        out.check(
+            "integrity.files",
+            CATEGORY,
+            CheckStatus.PASS,
+            f"All {len(baseline)} baselined critical files verified ({info_changes} legitimate system service account change(s) noted)",
             source=SOURCE,
         )
     else:

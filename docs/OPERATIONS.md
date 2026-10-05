@@ -149,23 +149,27 @@ sudo -u shsm shsm findings resolve all
 
 ## 6. File & System Integrity Monitoring (FIM)
 
-Memantau modifikasi tak terotorisasi pada file sistem kritis (`/etc/passwd`, `/etc/shadow`, `/etc/sudoers`, `/etc/ssh/sshd_config`, dll).
+Memantau modifikasi file sistem kritis (`/etc/passwd`, `/etc/group`, `/etc/sudoers`, `/etc/ssh/sshd_config`, dll) dengan **Smart Account & Group Diffing**:
+- **[INFO] System Accounts**: Penambahan akun paket/layanan resmi (UID < 1000 dengan non-login shell `/bin/false` atau `/usr/sbin/nologin` seperti `clamav`, `shsm`, `redis`) diklasifikasikan sebagai `INFO` disertai bukti log installer (`auth.log`), tanpa memicu kepanikan atau penalti skor.
+- **[WARNING] New Interactive Users**: Akun login baru (UID >= 1000 dengan shell `/bin/bash` atau `/bin/sh`) diklasifikasikan sebagai `MEDIUM/WARNING` untuk verifikasi admin.
+- **[CRITICAL] Backdoor & Privilege Escalation**: Akun UID 0 selain root, perubahan shell service account menjadi `/bin/bash`, atau penambahan user ke grup istimewa (`sudo`, `wheel`, `docker`) langsung memicu alarm `CRITICAL`.
 
 ### Memeriksa Status Baseline FIM
 ```bash
 sudo -u shsm shsm integrity status
 ```
 
-### Memperbarui Baseline Integritas
-Jalankan ini setelah melakukan perubahan konfigurasi server yang sah (misal setelah membuat user baru atau mengubah port SSH):
-```bash
-sudo -u shsm shsm integrity baseline --update
-```
-
 ### Memeriksa Integritas File Saat Ini terhadap Baseline
 ```bash
 sudo -u shsm shsm integrity check
 ```
+
+### Memperbarui Baseline Integritas
+Jalankan ini setelah melakukan perubahan konfigurasi server yang sah (misal setelah menginstal paket baru, membuat user resmi, atau mengubah port SSH) untuk memperbarui baseline dan otomatis menyelesaikan (*auto-resolve*) alert:
+```bash
+sudo -u shsm shsm integrity baseline --update
+```
+
 
 ---
 
