@@ -251,6 +251,7 @@ if [ -d "$SCRIPT_DIR/systemd" ]; then
     systemctl daemon-reload
 
     log_info "Enabling all 21 SHSM timers..."
+    systemctl reset-failed 'shsm-*' 2>/dev/null || true
     for timer in /etc/systemd/system/shsm-*.timer; do
         timer_name=$(basename "$timer")
         systemctl enable --now "$timer_name"

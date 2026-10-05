@@ -189,11 +189,20 @@ def collect(ctx: Context) -> CollectorOutput:
         proc = p["process"].lower()
         if port in exceptions:
             continue
-        # Check MariaDB (3306) and Redis (6379)
-        if port == 3306 or "mysql" in proc or "mariadb" in proc:
+        # Exclude FTP daemons that link to mysql (e.g. pure-ftpd-mysql) and port 21
+        if "pure-ftpd" in proc or "ftpd" in proc or port in (20, 21):
+            continue
+
+        # Check MariaDB (3306 or actual mysqld processes) and Redis (6379 or redis-server)
+        is_mariadb = port == 3306 or any(m in proc for m in ("mysqld", "mariadbd"))
+        is_redis = port == 6379 or "redis-server" in proc
+
+        if is_mariadb:
             flagged_dbs.append((port, p["process"], "MariaDB"))
-        elif port == 6379 or "redis" in proc:
+        elif is_redis:
             flagged_dbs.append((port, p["process"], "Redis"))
+
+    out.scope("firewall.public_db")
 
     if flagged_dbs:
         for port, proc, name in flagged_dbs:

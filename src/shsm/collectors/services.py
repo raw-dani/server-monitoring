@@ -267,6 +267,8 @@ def _check_failed_units(ctx: Context, out: CollectorOutput) -> None:
 
     out.metric("systemd.failed_units_count", len(failed_units))
 
+    out.scope("systemd.failed")
+
     if failed_units:
         unit_str = join_limited(failed_units, 5)
         out.check(
@@ -274,6 +276,7 @@ def _check_failed_units(ctx: Context, out: CollectorOutput) -> None:
             CATEGORY,
             CheckStatus.WARNING,
             f"{len(failed_units)} failed systemd unit(s): {unit_str}",
+            asset="Systemd",
             source=SOURCE,
         )
         out.finding(
@@ -284,8 +287,9 @@ def _check_failed_units(ctx: Context, out: CollectorOutput) -> None:
             f"{len(failed_units)} failed systemd unit(s) detected",
             f"The following unit(s) are in failed state: {unit_str}.",
             "Run 'systemctl --failed' and 'journalctl -u <unit>' to inspect and reset failed units.",
-            asset=unit_str,
+            asset="Systemd",
             source=SOURCE,
+            key="systemd_failed",
         )
     else:
         out.check(
@@ -293,6 +297,7 @@ def _check_failed_units(ctx: Context, out: CollectorOutput) -> None:
             CATEGORY,
             CheckStatus.PASS,
             "No failed systemd units on the host",
+            asset="Systemd",
             source=SOURCE,
         )
 
