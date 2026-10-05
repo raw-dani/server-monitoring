@@ -12,8 +12,19 @@ SOURCE = "fail2ban"
 CATEGORY = "security"
 
 
+def _run_with_sudo_fallback(ctx: Context, cmd: List[str], timeout: float = 10) -> Any:
+    res = ctx.runner.run(cmd, timeout=timeout)
+    if res.ok:
+        return res
+    if ctx.runner.which("sudo"):
+        res_sudo = ctx.runner.run(["sudo"] + cmd, timeout=timeout)
+        if res_sudo.ok:
+            return res_sudo
+    return res
+
+
 def query_jail_status(ctx: Context, client_bin: str, jail: str) -> Dict[str, Any]:
-    res = ctx.runner.run([client_bin, "status", jail], timeout=10)
+    res = _run_with_sudo_fallback(ctx, [client_bin, "status", jail], timeout=10)
     if not res.ok:
         return {"jail": jail, "ok": False, "currently_banned": 0, "total_banned": 0, "banned_ips": []}
 
@@ -53,26 +64,40 @@ def collect(ctx: Context) -> CollectorOutput:
         out.check("fail2ban.status", CATEGORY, CheckStatus.NOT_APPLICABLE, "fail2ban-client not installed", source=SOURCE)
         return out
 
-    res = ctx.runner.run([client_bin, "status"], timeout=10)
+    out.scope("fail2ban.status")
+
+    res = _run_with_sudo_fallback(ctx, [client_bin, "status"], timeout=10)
     if not res.ok:
-        out.check(
-            "fail2ban.status",
-            CATEGORY,
-            CheckStatus.WARNING,
-            f"Fail2Ban service not running or socket error: {res.stderr[:100]}",
-            source=SOURCE,
-        )
-        out.finding(
-            "fail2ban.status",
-            CATEGORY,
-            Severity.MEDIUM,
-            Confidence.CONFIRMED,
-            "Fail2Ban is installed but not currently active",
-            f"fail2ban-client status failed: {res.describe()}.",
-            "Check fail2ban service (systemctl status fail2ban) and verify configuration in /etc/fail2ban/.",
-            source=SOURCE,
-            key="fail2ban_inactive",
-        )
+        # Check if service is actually active via systemctl
+        svc_res = ctx.runner.run(["systemctl", "is-active", "fail2ban"], timeout=5)
+        is_svc_active = svc_res.ok and svc_res.stdout.strip() == "active"
+        if is_svc_active:
+            out.check(
+                "fail2ban.status",
+                CATEGORY,
+                CheckStatus.WARNING,
+                "Fail2Ban service is active but socket communication failed (check sudoers / socket permissions)",
+                source=SOURCE,
+            )
+        else:
+            out.check(
+                "fail2ban.status",
+                CATEGORY,
+                CheckStatus.WARNING,
+                f"Fail2Ban service not running or socket error: {res.stderr[:100]}",
+                source=SOURCE,
+            )
+            out.finding(
+                "fail2ban.status",
+                CATEGORY,
+                Severity.MEDIUM,
+                Confidence.CONFIRMED,
+                "Fail2Ban is installed but not currently active",
+                f"fail2ban-client status failed: {res.describe()}.",
+                "Check fail2ban service (systemctl status fail2ban) and verify configuration in /etc/fail2ban/.",
+                source=SOURCE,
+                key="fail2ban_inactive",
+            )
         return out
 
     jails: List[str] = []

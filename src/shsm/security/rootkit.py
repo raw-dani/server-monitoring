@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus, CollectorOutput, Confidence, Severity
@@ -15,17 +15,33 @@ _RKH_WARNING = re.compile(r"\[\s*WARNING\s*\]")
 _CHK_INFECTED = re.compile(r"(?i)\bINFECTED\b")
 
 
+def _run_with_sudo_fallback(
+    ctx: Context, cmd: List[str], timeout: float = 60, ok_returncodes: Tuple[int, ...] = (0,)
+) -> Any:
+    res = ctx.runner.run(cmd, timeout=timeout, ok_returncodes=ok_returncodes)
+    if res.ran and res.ok:
+        return res
+    if ctx.runner.which("sudo"):
+        res_sudo = ctx.runner.run(["sudo"] + cmd, timeout=timeout, ok_returncodes=ok_returncodes)
+        if res_sudo.ran and res_sudo.ok:
+            return res_sudo
+    return res
+
+
 def run_rkhunter(ctx: Context, timeout: float) -> Tuple[bool, List[str], str]:
     rkh = ctx.runner.which("rkhunter")
     if not rkh:
         return False, [], "rkhunter not installed"
 
-    # --cronjob: non-interactive, --rwo: report warnings only
-    res = ctx.runner.run([rkh, "--cronjob", "--rwo", "--no-mail"], timeout=timeout, ok_returncodes=(0, 1))
+    # --check: required check mode, --cronjob: non-interactive, --rwo: report warnings only, --sk: skip keypress
+    res = _run_with_sudo_fallback(
+        ctx, [rkh, "--check", "--cronjob", "--rwo", "--sk"], timeout=timeout, ok_returncodes=(0, 1)
+    )
     if not res.ran:
         return False, [], f"rkhunter failed: {res.describe()}"
 
-    warnings = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    # Only accept lines matching actual [ WARNING ] pattern to avoid capturing option errors or summaries
+    warnings = [line.strip() for line in res.stdout.splitlines() if _RKH_WARNING.search(line)]
     return True, warnings, ""
 
 
@@ -34,7 +50,7 @@ def run_chkrootkit(ctx: Context, timeout: float) -> Tuple[bool, List[str], str]:
     if not chk:
         return False, [], "chkrootkit not installed"
 
-    res = ctx.runner.run([chk, "-q"], timeout=timeout, ok_returncodes=(0, 1))
+    res = _run_with_sudo_fallback(ctx, [chk, "-q"], timeout=timeout, ok_returncodes=(0, 1))
     if not res.ran:
         return False, [], f"chkrootkit failed: {res.describe()}"
 
@@ -76,6 +92,7 @@ def scan(ctx: Context) -> CollectorOutput:
         return out
 
     out.metric("rootkit.warnings_count", len(all_warnings))
+    out.scope("rootkit.warning")
 
     if all_warnings:
         for w in all_warnings[:10]:

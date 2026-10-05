@@ -133,10 +133,18 @@ def collect(ctx: Context) -> CollectorOutput:
         out.check("website.http", CATEGORY, CheckStatus.NOT_APPLICABLE, "No websites registered or discovered", source=SOURCE)
         return out
 
+    out.scope("website.http")
+    out.scope("website.dns")
+
     max_workers = int(ctx.config.get("websites.max_workers", 4))
     timeout = float(ctx.config.get("websites.timeout_seconds", 10))
     user_agent = str(ctx.config.get("websites.user_agent", "SHSM-Monitor/1.0"))
-    default_expected = list(ctx.config.get("websites.default_expected_status", [200]))
+    default_expected = list(
+        ctx.config.get(
+            "websites.default_expected_status",
+            [200, 201, 204, 301, 302, 307, 308, 401, 403],
+        )
+    )
     fail_threshold = int(ctx.threshold("website_failures_before_critical"))
     resp_warn = float(ctx.threshold("website_response_warning_seconds")) * 1000.0
     resp_crit = float(ctx.threshold("website_response_critical_seconds")) * 1000.0

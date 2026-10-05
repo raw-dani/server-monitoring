@@ -83,6 +83,8 @@ def collect(ctx: Context) -> CollectorOutput:
         out.check("ssl.certificate", CATEGORY, CheckStatus.NOT_APPLICABLE, "No websites to check SSL for", source=SOURCE)
         return out
 
+    out.scope("ssl.certificate")
+
     max_workers = int(ctx.config.get("websites.max_workers", 4))
     timeout = float(ctx.config.get("websites.timeout_seconds", 10))
 

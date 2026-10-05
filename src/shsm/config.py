@@ -187,7 +187,7 @@ DEFAULTS: Dict[str, Any] = {
         "include": [],  # list of domains or {domain, doc_root, expected_status}
         "exclude": [],
         "expected_status": {},  # domain -> [codes]
-        "default_expected_status": [200],
+        "default_expected_status": [200, 201, 204, 301, 302, 307, 308, 401, 403],
         "max_workers": 4,
         "timeout_seconds": 10,
         "max_redirects": 5,
