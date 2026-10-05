@@ -13,41 +13,88 @@ SOURCE = "firewall_audit"
 CATEGORY = "security"
 
 
+def _exec_firewall_cmd(ctx: Context, cmd: List[str], timeout: float = 10) -> Any:
+    """Execute command, with fallback to sudo if unprivileged."""
+    res = ctx.runner.run(cmd, timeout=timeout)
+    if res.ok:
+        return res
+    if ctx.runner.which("sudo"):
+        res_sudo = ctx.runner.run(["sudo"] + cmd, timeout=timeout)
+        if res_sudo.ok:
+            return res_sudo
+    return res
+
+
 def detect_active_firewall(ctx: Context) -> Tuple[str, bool, str]:
-    """Check UFW, CSF, Firewalld, or iptables/nftables."""
-    # 1. UFW
-    if ctx.runner.which("ufw"):
-        res = ctx.runner.run(["ufw", "status"], timeout=10)
+    """Check configured or auto-detected firewall: CSF, Firewalld, UFW, iptables, nftables, or custom."""
+    backend = str(ctx.config.get("security.firewall_backend", "auto")).lower()
+
+    # 1. Custom command check if explicitly configured
+    if backend == "custom":
+        custom_cmd = ctx.config.get("security.firewall_custom_cmd", [])
+        if isinstance(custom_cmd, list) and custom_cmd:
+            res = _exec_firewall_cmd(ctx, custom_cmd, timeout=10)
+            if res.ok:
+                return "custom", True, f"Custom firewall command '{custom_cmd[0]}' succeeded"
+            return "custom", False, f"Custom firewall command '{custom_cmd[0]}' failed: {res.stderr or res.message}"
+        return "custom", False, "Custom firewall backend selected but no security.firewall_custom_cmd defined"
+
+    # 2. CSF (ConfigServer Security & Firewall) - very popular on CyberPanel
+    if backend in ("auto", "csf") and (ctx.runner.which("csf") or ctx.runner.which("/usr/sbin/csf")):
+        csf_bin = ctx.runner.which("csf") or "/usr/sbin/csf"
+        res = _exec_firewall_cmd(ctx, [csf_bin, "-l"], timeout=10)
+        if res.ok and ("Chain" in res.stdout or "csf" in res.stdout.lower()):
+            return "csf", True, "CSF (ConfigServer Security & Firewall) is active"
+
+    # 3. Firewalld (firewall-cmd)
+    if backend in ("auto", "firewalld") and ctx.runner.which("firewall-cmd"):
+        res = _exec_firewall_cmd(ctx, ["firewall-cmd", "--state"], timeout=10)
+        if res.ok and "running" in res.stdout.lower():
+            return "firewalld", True, "Firewalld is running and active"
+
+    # 4. UFW (Uncomplicated Firewall)
+    if backend in ("auto", "ufw") and ctx.runner.which("ufw"):
+        res = _exec_firewall_cmd(ctx, ["ufw", "status"], timeout=10)
         if res.ok:
             if "status: active" in res.stdout.lower():
-                return "ufw", True, "UFW is active"
+                return "ufw", True, "UFW firewall is active"
             elif "status: inactive" in res.stdout.lower():
                 return "ufw", False, "UFW is installed but inactive"
 
-    # 2. CSF
-    if ctx.runner.which("csf"):
-        res = ctx.runner.run(["csf", "-l"], timeout=10)
-        if res.ok:
-            return "csf", True, "CSF firewall is active"
-
-    # 3. Firewalld
-    if ctx.runner.which("firewall-cmd"):
-        res = ctx.runner.run(["firewall-cmd", "--state"], timeout=10)
-        if res.ok and "running" in res.stdout.lower():
-            return "firewalld", True, "Firewalld is running"
-
-    # 4. iptables / nftables fallback check
-    if ctx.runner.which("nft"):
-        res = ctx.runner.run(["nft", "list", "ruleset"], timeout=10)
+    # 5. nftables
+    if backend in ("auto", "nftables") and ctx.runner.which("nft"):
+        res = _exec_firewall_cmd(ctx, ["nft", "list", "ruleset"], timeout=10)
         if res.ok and len(res.stdout.strip()) > 20:
-            return "nftables", True, "nftables rules active"
+            return "nftables", True, "nftables ruleset is active"
 
-    if ctx.runner.which("iptables"):
-        res = ctx.runner.run(["iptables", "-L", "-n"], timeout=10)
-        if res.ok and "Chain" in res.stdout:
-            return "iptables", True, "iptables rules active"
+    # 6. iptables / iptables-legacy
+    if backend in ("auto", "iptables"):
+        ipt = ctx.runner.which("iptables") or ctx.runner.which("/sbin/iptables") or ctx.runner.which("/usr/sbin/iptables")
+        if ipt:
+            res = _exec_firewall_cmd(ctx, [ipt, "-L", "-n"], timeout=10)
+            if res.ok and "Chain" in res.stdout:
+                # Count non-header lines
+                lines = [ln.strip() for ln in res.stdout.splitlines() if ln.strip() and not ln.startswith("Chain") and not ln.startswith("target")]
+                return "iptables", True, f"iptables is active ({len(lines)} rules configured)"
 
-    return "none", False, "No active firewall service detected"
+    # 7. Fallback to active systemd units
+    for unit_name, fw_label in [
+        ("csf.service", "csf"),
+        ("firewalld.service", "firewalld"),
+        ("ufw.service", "ufw"),
+        ("nftables.service", "nftables"),
+        ("netfilter-persistent.service", "iptables"),
+        ("iptables.service", "iptables"),
+    ]:
+        if backend in ("auto", fw_label):
+            res = ctx.runner.run(["systemctl", "is-active", unit_name], timeout=5)
+            if res.ok and res.stdout.strip() == "active":
+                return fw_label, True, f"{unit_name} is active in systemd"
+
+    if backend != "auto" and backend != "none":
+        return backend, False, f"Configured firewall backend '{backend}' is not active or not installed"
+
+    return "none", False, "No active firewall service detected (checked CSF, Firewalld, UFW, iptables, nftables)"
 
 
 def _is_public_ip(ip: str) -> bool:

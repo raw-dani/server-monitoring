@@ -269,6 +269,8 @@ DEFAULTS: Dict[str, Any] = {
         "documented_exceptions": [],  # [{check: "firewall.public_db", port: 3306, reason: "..."}]
         "suspicious_outbound_processes": ["nc", "ncat", "netcat", "socat", "bash", "sh", "dash", "zsh"],
         "apt_check": True,
+        "firewall_backend": "auto",  # auto | csf | firewalld | ufw | iptables | nftables | custom | none
+        "firewall_custom_cmd": [],
     },
     "alerts": {
         "enabled": True,
@@ -330,6 +332,7 @@ _RULES: List[Tuple[str, str, Optional[float], Optional[float], Optional[tuple]]]
     ("websites.max_workers", "int", 1, 16, None),
     ("websites.timeout_seconds", "int", 1, 120, None),
     ("wordpress.command_timeout_seconds", "int", 5, 900, None),
+    ("security.firewall_backend", "str", None, None, ("auto", "csf", "firewalld", "ufw", "iptables", "nftables", "custom", "none")),
 ]
 
 _PAIRED_THRESHOLDS = [

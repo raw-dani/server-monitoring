@@ -221,6 +221,14 @@ scanning:
   rootkit:
     enabled: true
 
+security:
+  # Firewall backend: auto | csf | firewalld | ufw | iptables | nftables | custom | none
+  # 'auto' intelligently auto-detects active CSF, Firewalld, UFW, iptables, or nftables
+  firewall_backend: "auto"
+  # Custom command if firewall_backend is set to 'custom':
+  # firewall_custom_cmd: ["/sbin/iptables", "-L", "-n"]
+  documented_exceptions: []
+
 integrity:
   paths:
     - /etc/passwd

@@ -56,14 +56,27 @@ if ! $PYTHON_BIN -m venv --help &>/dev/null; then
     exit 1
 fi
 
-# Optional tools check
-for tool in ufw fail2ban-client wp lynis rkhunter clamscan; do
+# Optional security tools check
+for tool in fail2ban-client wp lynis rkhunter clamscan; do
     if command -v "$tool" &>/dev/null; then
         log_ok "Detected tool: $tool"
     else
         log_warn "Optional tool '$tool' not found in PATH. Relevant security checks will gracefully record UNAVAILABLE."
     fi
 done
+
+# Flexible firewall detection (CSF, Firewalld, UFW, iptables, nftables)
+FW_DETECTED=""
+for fw in csf firewall-cmd ufw iptables nft; do
+    if command -v "$fw" &>/dev/null; then
+        FW_DETECTED="$fw"
+        log_ok "Detected firewall binary: $fw"
+        break
+    fi
+done
+if [ -z "$FW_DETECTED" ]; then
+    log_warn "No standard firewall binary found in PATH (checked csf, firewall-cmd, ufw, iptables, nft). SHSM will use systemd status."
+fi
 
 # 2. Setup Dedicated User & Group
 SHSM_USER="shsm"

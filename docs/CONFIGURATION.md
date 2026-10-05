@@ -100,6 +100,27 @@ wordpress:
   wp_cli: "/usr/local/bin/wp"       # Executed via sudo -u <site-owner>
 ```
 
+### Security & Flexible Firewall
+SHSM supports multiple firewall technologies interchangeably:
+```yaml
+security:
+  # Firewall backend detection: auto | csf | firewalld | ufw | iptables | nftables | custom | none
+  # 'auto' intelligently checks CSF (common in CyberPanel), Firewalld, UFW, iptables, and nftables
+  firewall_backend: "auto"
+
+  # Optional custom command (only if firewall_backend: "custom")
+  # firewall_custom_cmd: ["/usr/sbin/iptables", "-L", "-n"]
+```
+Supported Backends:
+- **`auto` (Default)**: Automatically detects whatever firewall is running (CSF, Firewalld, UFW, iptables, or nftables) through binary tools and systemd service inspection.
+- **`csf`**: ConfigServer Security & Firewall (frequently bundled with CyberPanel).
+- **`firewalld`**: Dynamic firewall daemon (`firewall-cmd`).
+- **`ufw`**: Uncomplicated Firewall (`ufw status`).
+- **`iptables`**: Direct netfilter packet inspection (`iptables -L -n`).
+- **`nftables`**: Modern Linux packet classification (`nft list ruleset`).
+- **`custom`**: Runs an arbitrary status check array defined in `firewall_custom_cmd`.
+- **`none`**: Disables firewall presence checks if the VPS uses an external cloud provider security group (e.g. AWS Security Group / DigitalOcean Cloud Firewall).
+
 ---
 
 ## 3. Secret Management & File Permissions

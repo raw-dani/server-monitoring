@@ -14,10 +14,13 @@ shsm ALL=(ALL) NOPASSWD: /usr/bin/rkhunter --check *
 shsm ALL=(ALL) NOPASSWD: /usr/bin/chkrootkit *
 shsm ALL=(ALL) NOPASSWD: /usr/bin/clamscan *, /usr/bin/clamdscan *
 
-# 4. Firewall inspection (read-only)
-shsm ALL=(ALL) NOPASSWD: /usr/sbin/ufw status *
-shsm ALL=(ALL) NOPASSWD: /usr/sbin/csf -l
-shsm ALL=(ALL) NOPASSWD: /usr/sbin/nft list ruleset
+# 4. Firewall inspection (strictly read-only)
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/ufw status *, /usr/bin/ufw status *
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/csf -l, /usr/bin/csf -l
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/nft list ruleset, /usr/bin/nft list ruleset
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/iptables -L *, /sbin/iptables -L *, /usr/bin/iptables -L *
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables -L *, /sbin/ip6tables -L *, /usr/bin/ip6tables -L *
+shsm ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd --state, /usr/bin/firewall-cmd --list-all *
 
 # 5. Fail2ban status (read-only)
 shsm ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status *
