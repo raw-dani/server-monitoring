@@ -72,13 +72,13 @@ SHSM_GROUP="shsm"
 # Clean stale lock files if any
 rm -f /etc/passwd.lock /etc/shadow.lock /etc/group.lock /etc/gshadow.lock /etc/.pwd.lock 2>/dev/null || true
 
-# Check and temporarily remove immutable attribute if set by security hardening
-WAS_PASSWD_IMMUTABLE=false
+# Check and temporarily remove immutable/append-only attributes if set by security hardening
+PASSWD_ORIG_ATTRS=""
 if command -v lsattr &>/dev/null && command -v chattr &>/dev/null; then
-    if lsattr /etc/passwd 2>/dev/null | grep -q -- "-i-"; then
-        log_warn "Detected immutable attribute (+i) on /etc/passwd. Temporarily unlocking..."
-        chattr -i /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>/dev/null || true
-        WAS_PASSWD_IMMUTABLE=true
+    PASSWD_ORIG_ATTRS=$(lsattr /etc/passwd 2>/dev/null | awk '{print $1}' | tr -d '-' || true)
+    if [ -n "$PASSWD_ORIG_ATTRS" ]; then
+        log_warn "Detected special file attributes ($PASSWD_ORIG_ATTRS) on /etc/passwd. Temporarily unlocking (-ia)..."
+        chattr -ia /etc/passwd /etc/shadow /etc/group /etc/gshadow /etc/subuid /etc/subgid 2>/dev/null || true
     fi
 fi
 
@@ -92,10 +92,12 @@ if ! id -u "$SHSM_USER" &>/dev/null; then
     useradd --system --gid "$SHSM_GROUP" --shell /bin/false --no-create-home "$SHSM_USER"
 fi
 
-# Restore immutable attribute if it was previously set
-if [ "$WAS_PASSWD_IMMUTABLE" = true ] && command -v chattr &>/dev/null; then
-    log_info "Restoring immutable attribute (+i) on /etc/passwd..."
-    chattr +i /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>/dev/null || true
+# Restore previous attributes if they were set
+if [ -n "$PASSWD_ORIG_ATTRS" ] && command -v chattr &>/dev/null; then
+    log_info "Restoring attributes (+$PASSWD_ORIG_ATTRS) on authentication files..."
+    for attr in $(echo "$PASSWD_ORIG_ATTRS" | fold -w1); do
+        chattr "+$attr" /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>/dev/null || true
+    done
 fi
 
 # Add shsm to adm group to allow reading system logs if appropriate
