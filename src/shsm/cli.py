@@ -638,5 +638,64 @@ def cmd_retention_run(click_ctx: click.Context) -> None:
     click.secho(f"Retention run completed: {res}", fg="green")
 
 
+# ---------------------------------------------------------------- findings
+@main.group("findings")
+def grp_findings() -> None:
+    """Inspect and resolve detected security or health findings."""
+
+
+@grp_findings.command("list")
+@click.option("--status", type=click.Choice(["OPEN", "ACKNOWLEDGED", "RESOLVED", "SUPPRESSED", "ALL"]), default="OPEN", help="Filter by status")
+@click.option("--category", help="Filter by category (health, security)")
+@click.option("--limit", default=50, help="Max findings to show")
+@click.pass_context
+def cmd_findings_list(click_ctx: click.Context, status: str, category: Optional[str], limit: int) -> None:
+    """List recorded findings."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    statuses = None if status == "ALL" else [status]
+    items = app_ctx.findings.list(statuses=statuses, category=category, limit=limit)
+    if not items:
+        click.echo(f"No findings matching status '{status}'.")
+        return
+    click.echo(f"Found {len(items)} finding(s):")
+    for f in items:
+        col = "red" if f["severity"] == "CRITICAL" else ("yellow" if f["severity"] == "HIGH" else "cyan")
+        click.secho(f"[{f['status']}] [{f['severity']}] {f['title']} (Asset: {f['asset']})", fg=col)
+        click.echo(f"  UID: {f['uid']} | Check: {f['check_id']} | Last seen: {f['last_seen']}")
+
+
+@grp_findings.command("resolve")
+@click.argument("ident")
+@click.option("--note", default="Resolved by admin", help="Resolution note")
+@click.pass_context
+def cmd_findings_resolve(click_ctx: click.Context, ident: str, note: str) -> None:
+    """Resolve a finding by UID, or resolve batch ('all-malware' / 'all')."""
+    from shsm.core.findings import FindingStatus
+
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    now = app_ctx.now()
+    if ident == "all-malware":
+        rows = app_ctx.findings.list(statuses=["OPEN", "ACKNOWLEDGED"])
+        resolved_count = 0
+        for r in rows:
+            if r["check_id"].startswith("malware"):
+                app_ctx.findings.set_status(r["uid"], FindingStatus.RESOLVED, note, now)
+                resolved_count += 1
+        click.secho(f"Resolved {resolved_count} malware finding(s).", fg="green")
+        return
+    if ident == "all":
+        rows = app_ctx.findings.list(statuses=["OPEN", "ACKNOWLEDGED"])
+        for r in rows:
+            app_ctx.findings.set_status(r["uid"], FindingStatus.RESOLVED, note, now)
+        click.secho(f"Resolved {len(rows)} finding(s).", fg="green")
+        return
+
+    ok = app_ctx.findings.set_status(ident, FindingStatus.RESOLVED, note, now)
+    if ok:
+        click.secho(f"Finding {ident} marked as RESOLVED.", fg="green")
+    else:
+        click.secho(f"Finding {ident} not found.", fg="red")
+
+
 if __name__ == "__main__":
     main()

@@ -169,7 +169,7 @@ openlitespeed:
 
 mariadb:
   enabled: auto
-  defaults_file: /etc/mysql/debian.cnf # Or /root/.my.cnf
+  defaults_file: /etc/shsm/secrets/my.cnf # Auto-configured during install, or /etc/mysql/debian.cnf
   timeout_seconds: 15
 
 redis:

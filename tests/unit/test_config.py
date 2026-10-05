@@ -35,3 +35,9 @@ def test_config_validation():
     res = validate_config(bad_data)
     assert not res.ok
     assert any("thresholds" in err for err in res.errors)
+
+
+def test_lock_dir_default():
+    cfg = Config(DEFAULTS)
+    assert cfg.get("paths.lock_dir") == "/var/lib/shsm/locks"
+

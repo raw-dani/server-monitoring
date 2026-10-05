@@ -123,12 +123,16 @@ LOG_DIR="/var/log/shsm"
 CONFIG_DIR="/etc/shsm"
 REPORT_DIR="/var/lib/shsm/reports"
 BACKUP_DIR="/var/lib/shsm/backups"
+LOCK_DIR="$DATA_DIR/locks"
+SECRETS_DIR="$CONFIG_DIR/secrets"
+RUN_DIR="/run/shsm"
 
 log_info "Creating required directories..."
 mkdir -p "$INSTALL_DIR"
-mkdir -p "$DATA_DIR" "$REPORT_DIR" "$BACKUP_DIR"
+mkdir -p "$DATA_DIR" "$REPORT_DIR" "$BACKUP_DIR" "$LOCK_DIR"
 mkdir -p "$LOG_DIR"
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR" "$SECRETS_DIR"
+mkdir -p "$RUN_DIR" 2>/dev/null || true
 
 # 4. Copy Codebase & Create Virtualenv
 log_info "Setting up virtual environment and copying files..."
@@ -171,6 +175,37 @@ if [ ! -f "$CONFIG_DIR/paths.yaml" ] && [ -f "$SCRIPT_DIR/config/paths.example.y
     cp "$SCRIPT_DIR/config/paths.example.yaml" "$CONFIG_DIR/paths.yaml"
 fi
 
+# Auto-configure MariaDB credentials if available
+if [ ! -f "$SECRETS_DIR/my.cnf" ]; then
+    if [ -f /etc/cyberpanel/mysqlPassword ]; then
+        log_info "Detected CyberPanel MySQL root password. Generating $SECRETS_DIR/my.cnf..."
+        CYBER_DB_PASS=$(tr -d '\r\n' < /etc/cyberpanel/mysqlPassword)
+        cat <<EOF > "$SECRETS_DIR/my.cnf"
+[client]
+user=root
+password=$CYBER_DB_PASS
+socket=/var/run/mysqld/mysqld.sock
+EOF
+        chown root:"$SHSM_GROUP" "$SECRETS_DIR/my.cnf"
+        chmod 0640 "$SECRETS_DIR/my.cnf"
+        log_ok "Generated $SECRETS_DIR/my.cnf for MariaDB client."
+    elif [ -f /root/.my.cnf ]; then
+        log_info "Detected /root/.my.cnf. Copying to $SECRETS_DIR/my.cnf..."
+        cp /root/.my.cnf "$SECRETS_DIR/my.cnf"
+        chown root:"$SHSM_GROUP" "$SECRETS_DIR/my.cnf"
+        chmod 0640 "$SECRETS_DIR/my.cnf"
+        log_ok "Copied credentials from /root/.my.cnf."
+    fi
+fi
+
+# If config has /etc/mysql/debian.cnf which may not be accessible, switch to generated my.cnf
+if [ -f "$CONFIG_DIR/config.yaml" ] && grep -q "/etc/mysql/debian.cnf" "$CONFIG_DIR/config.yaml"; then
+    if [ -f "$SECRETS_DIR/my.cnf" ]; then
+        log_info "Updating config.yaml to use generated $SECRETS_DIR/my.cnf..."
+        sed -i 's|/etc/mysql/debian.cnf|/etc/shsm/secrets/my.cnf|g' "$CONFIG_DIR/config.yaml"
+    fi
+fi
+
 # 6. Sudoers file
 if [ -f "$SCRIPT_DIR/scripts/shsm.sudoers" ]; then
     log_info "Installing sudoers configuration..."
@@ -184,10 +219,21 @@ fi
 log_info "Enforcing strict filesystem permissions..."
 chown -R "$SHSM_USER:$SHSM_GROUP" "$DATA_DIR" "$LOG_DIR" "$INSTALL_DIR"
 chown -R root:"$SHSM_GROUP" "$CONFIG_DIR"
+chown -R "$SHSM_USER:$SHSM_GROUP" "$RUN_DIR" 2>/dev/null || true
 
-chmod 0750 "$DATA_DIR" "$LOG_DIR"
-chmod 0750 "$CONFIG_DIR"
+chmod 0750 "$DATA_DIR" "$LOG_DIR" "$LOCK_DIR"
+chmod 0750 "$CONFIG_DIR" "$SECRETS_DIR"
+chmod 0775 "$RUN_DIR" 2>/dev/null || true
 find "$CONFIG_DIR" -type f -exec chmod 0640 {} +
+if [ -f "$SECRETS_DIR/my.cnf" ]; then
+    chmod 0640 "$SECRETS_DIR/my.cnf"
+    chown root:"$SHSM_GROUP" "$SECRETS_DIR/my.cnf"
+fi
+
+# Ensure systemd creates /run/shsm with proper ownership across reboots
+if [ -d /etc/tmpfiles.d ]; then
+    echo "d /run/shsm 0775 $SHSM_USER $SHSM_GROUP -" > /etc/tmpfiles.d/shsm.conf
+fi
 
 # 8. Run Database Migrations
 log_info "Running initial SQLite database migrations..."

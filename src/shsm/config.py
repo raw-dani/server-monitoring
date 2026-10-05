@@ -41,7 +41,7 @@ DEFAULTS: Dict[str, Any] = {
         "report_dir": "/var/lib/shsm/reports",
         "cache_dir": "/var/cache/shsm",
         "rules_dir": "/etc/shsm/rules",
-        "lock_dir": "/run/shsm",
+        "lock_dir": "/var/lib/shsm/locks",
     },
     "email": {
         "enabled": True,
@@ -594,10 +594,11 @@ class Config:
             except OSError as exc:
                 problems.append(f"{path}: cannot stat ({exc.strerror})")
                 continue
-            if st.st_uid != 0:
-                problems.append(f"{path}: not owned by root")
-            if stat.S_IMODE(st.st_mode) & 0o077:
-                problems.append(f"{path}: mode {oct(stat.S_IMODE(st.st_mode))} is too permissive (expected 0600)")
+            mode = stat.S_IMODE(st.st_mode)
+            if mode & 0o007:
+                problems.append(f"{path}: world-accessible (mode {oct(mode)}, expected 0600 or 0640)")
+            elif mode & 0o020:
+                problems.append(f"{path}: group-writable (mode {oct(mode)}, expected 0600 or 0640)")
         return problems
 
 

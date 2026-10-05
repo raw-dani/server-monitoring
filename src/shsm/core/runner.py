@@ -29,8 +29,17 @@ class RunnerEngine:
     ) -> Tuple[int, CollectorOutput]:
         """Execute a job wrapped in file locks, DB run lifecycle tracking, and finding reconciliation."""
         now = self.ctx.now()
-        lock_dir = str(self.ctx.config.get("paths.lock_dir", "/run/shsm"))
-        os.makedirs(lock_dir, exist_ok=True)
+        lock_dir = str(self.ctx.config.get("paths.lock_dir", "/var/lib/shsm/locks"))
+        try:
+            os.makedirs(lock_dir, exist_ok=True)
+        except OSError:
+            lock_dir = "/var/lib/shsm/locks"
+            try:
+                os.makedirs(lock_dir, exist_ok=True)
+            except OSError:
+                import tempfile
+                lock_dir = os.path.join(tempfile.gettempdir(), "shsm_locks")
+                os.makedirs(lock_dir, exist_ok=True)
 
         job_def = JOBS_BY_NAME.get(job_name)
         is_heavy = job_def.heavy if job_def else False

@@ -32,19 +32,30 @@ def _run_query(ctx: Context, query: str) -> Tuple[bool, str, str]:
 
     args = [client, "--batch", "--raw", "--silent", "-e", query]
 
+    # Resolve defaults file safely (only if readable by current process)
     defaults_file = ctx.config.secret_path("mariadb_defaults")
-    if defaults_file and os.path.isfile(defaults_file):
-        args.insert(1, f"--defaults-file={defaults_file}")
+    found_defaults = None
+    if defaults_file and os.path.isfile(defaults_file) and os.access(defaults_file, os.R_OK):
+        found_defaults = defaults_file
     else:
         # Check standard defaults locations if readable
-        for std in ("/etc/mysql/debian.cnf", "/root/.my.cnf"):
+        for std in ("/etc/shsm/secrets/my.cnf", "/etc/mysql/debian.cnf", "/root/.my.cnf"):
             if os.path.isfile(std) and os.access(std, os.R_OK):
-                args.insert(1, f"--defaults-file={std}")
+                found_defaults = std
                 break
+
+    if found_defaults:
+        args.insert(1, f"--defaults-file={found_defaults}")
 
     socket_path = ctx.config.get("mariadb.socket")
     if socket_path and os.path.exists(socket_path):
         args.extend(["--socket", socket_path])
+    elif not ctx.config.get("mariadb.host"):
+        # Auto-detect common local socket locations
+        for std_sock in ("/var/run/mysqld/mysqld.sock", "/run/mysqld/mysqld.sock", "/tmp/mysql.sock"):
+            if os.path.exists(std_sock):
+                args.extend(["--socket", std_sock])
+                break
     elif ctx.config.get("mariadb.host"):
         args.extend(["--host", str(ctx.config.get("mariadb.host"))])
         args.extend(["--port", str(ctx.config.get("mariadb.port", 3306))])

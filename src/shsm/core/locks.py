@@ -26,8 +26,21 @@ class FileLock:
         self._fh: Optional[object] = None
 
     def acquire(self) -> None:
-        os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
-        fh = open(self.path, "a+b")  # noqa: SIM115 - held until release()
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
+            fh = open(self.path, "a+b")  # noqa: SIM115 - held until release()
+        except (PermissionError, OSError):
+            # Fallback to /var/lib/shsm/locks or temp directory if /run/shsm is unwritable
+            import tempfile
+            fallback_dir = "/var/lib/shsm/locks"
+            try:
+                os.makedirs(fallback_dir, exist_ok=True)
+                self.path = os.path.join(fallback_dir, os.path.basename(self.path))
+                fh = open(self.path, "a+b")
+            except (PermissionError, OSError):
+                tmp_dir = tempfile.gettempdir()
+                self.path = os.path.join(tmp_dir, f"shsm_{os.path.basename(self.path)}")
+                fh = open(self.path, "a+b")
         try:
             if _HAVE_FCNTL:
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
