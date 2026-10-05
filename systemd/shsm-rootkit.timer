@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for Weekly rkhunter/chkrootkit scan
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=Sat *-*-* 04:00:00
+Persistent=true
+Unit=shsm-rootkit.service
+
+[Install]
+WantedBy=timers.target

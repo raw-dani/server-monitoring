@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for External heartbeat
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* *:0/5:45
+Persistent=true
+Unit=shsm-heartbeat.service
+
+[Install]
+WantedBy=timers.target

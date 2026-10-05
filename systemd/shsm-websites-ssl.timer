@@ -1,0 +1,12 @@
+[Unit]
+Description=SHSM timer for TLS certificate expiry checks
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* 00/6:15:00
+Persistent=true
+RandomizedDelaySec=120
+Unit=shsm-websites-ssl.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for systemd service monitoring
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* *:*:30
+Persistent=true
+Unit=shsm-services.service
+
+[Install]
+WantedBy=timers.target

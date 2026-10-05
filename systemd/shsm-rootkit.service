@@ -1,0 +1,16 @@
+[Unit]
+Description=SHSM Weekly rkhunter/chkrootkit scan
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml security scan --profile full --only rootkit
+TimeoutStartSec=5400
+StandardOutput=journal
+StandardError=journal
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

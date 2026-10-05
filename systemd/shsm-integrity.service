@@ -1,0 +1,13 @@
+[Unit]
+Description=SHSM Incremental file integrity check
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml integrity check
+TimeoutStartSec=1800
+StandardOutput=journal
+StandardError=journal

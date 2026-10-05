@@ -1,0 +1,12 @@
+[Unit]
+Description=SHSM timer for WordPress core/plugin/theme/user audit
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=shsm-wordpress-audit.service
+
+[Install]
+WantedBy=timers.target

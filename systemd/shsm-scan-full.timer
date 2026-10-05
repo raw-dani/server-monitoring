@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for Weekly heuristic + ClamAV full scan (low-traffic window)
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=Sun *-*-* 02:00:00
+Persistent=true
+Unit=shsm-scan-full.service
+
+[Install]
+WantedBy=timers.target

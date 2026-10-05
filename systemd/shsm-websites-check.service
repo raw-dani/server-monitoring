@@ -1,0 +1,13 @@
+[Unit]
+Description=SHSM Website DNS/HTTP checks
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=shsm
+Group=shsm
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml websites check --no-ssl
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal

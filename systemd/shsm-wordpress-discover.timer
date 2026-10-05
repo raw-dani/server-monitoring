@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for WordPress installation discovery
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* 00/6:10:00
+Persistent=true
+Unit=shsm-wordpress-discover.service
+
+[Install]
+WantedBy=timers.target

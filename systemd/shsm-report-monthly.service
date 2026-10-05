@@ -1,0 +1,13 @@
+[Unit]
+Description=SHSM Monthly HTML/PDF report
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml report monthly --send
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal

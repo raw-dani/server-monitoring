@@ -1,0 +1,251 @@
+# Server Health & Security Monitoring (SHSM) - Main Configuration
+# Copy to /etc/shsm/config.yaml and adjust permissions to 0640 (root:shsm)
+
+general:
+  server_name: auto                   # auto discovers system hostname
+  timezone: Asia/Jakarta              # Timezone for reports and logs
+  log_level: INFO                     # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  read_only: true                     # Strictly read-only monitoring; automated remediation is disabled
+  data_retention_days: 365            # Retention window for reports and finding history
+
+paths:
+  data_dir: /var/lib/shsm             # SQLite database and state files
+  log_dir: /var/log/shsm              # Application log files
+  config_dir: /etc/shsm               # Configuration directory
+  report_dir: /var/lib/shsm/reports   # Generated HTML and PDF reports
+  cache_dir: /var/cache/shsm          # Temporary cache
+  rules_dir: /etc/shsm/rules          # Custom scanning rule definitions
+  lock_dir: /run/shsm                 # Inter-process job locks
+
+email:
+  enabled: true
+  smtp_host: smtp.gmail.com
+  smtp_port: 587
+  security: starttls                  # starttls, ssl, or none (none only allowed for localhost)
+  username: ""                        # SMTP username / Gmail account
+  password_file: /etc/shsm/secrets/smtp_password  # Mode 0600 root-owned secret file
+  from_name: GM Teknologi Server Monitor
+  from_address: ""                    # Defaults to username if omitted
+  recipients:
+    - rohmataliwardani@gmail.com
+  timeout_seconds: 20
+  retries: 3
+  retry_base_delay_seconds: 2
+  retry_max_delay_seconds: 60
+
+schedule:
+  timezone: Asia/Jakarta
+  weekly_day: monday
+  weekly_time: "07:00"
+  monthly_day: 1
+  monthly_time: "07:00"
+
+external_monitoring:
+  enabled: false
+  provider: generic_webhook           # generic_webhook or uptime_kuma_push
+  heartbeat_url: ""                   # Independent HTTPS endpoint
+  token_file: /etc/shsm/secrets/external_token
+  interval_seconds: 300
+  timeout_seconds: 15
+  retries: 3
+  report_critical_as_down: false
+
+monitoring:
+  metrics_interval_seconds: 60
+  service_interval_seconds: 60
+  database_interval_seconds: 300
+  website_interval_seconds: 300
+  ssl_interval_seconds: 21600
+  wordpress_discovery_interval_seconds: 21600
+  cpu_window_minutes: 5
+  cpu_min_samples: 3
+  top_processes: 5
+  oom_lookback_minutes: 15
+  disk_ignore_fstypes:
+    - squashfs
+    - tmpfs
+    - devtmpfs
+    - overlay
+    - proc
+    - sysfs
+  disk_ignore_mountpoints:
+    - /boot/efi
+    - /snap
+  directory_size_targets:
+    - /var/log
+
+thresholds:
+  cpu_warning: 80
+  cpu_critical: 90
+  cpu_emergency: 95
+  load_per_cpu_warning: 1.5
+  load_per_cpu_critical: 3.0
+  load_per_cpu_emergency: 5.0
+  cpu_steal_warning: 5
+  cpu_steal_critical: 10
+  cpu_steal_emergency: 25
+  cpu_iowait_warning: 20
+  cpu_iowait_critical: 40
+  cpu_iowait_emergency: 60
+  memory_available_warning_percent: 20
+  memory_available_critical_percent: 10
+  memory_available_emergency_percent: 5
+  swap_warning: 50
+  swap_critical: 75
+  swap_emergency: 90
+  disk_warning_percent: 80
+  disk_critical_percent: 90
+  disk_emergency_percent: 95
+  inode_warning_percent: 80
+  inode_critical_percent: 90
+  inode_emergency_percent: 95
+  ssl_warning_days: 30
+  ssl_high_days: 14
+  ssl_critical_days: 7
+  website_response_warning_seconds: 3.0
+  website_response_critical_seconds: 8.0
+  website_failures_before_critical: 2
+  mariadb_connections_warning_percent: 80
+  mariadb_connections_critical_percent: 90
+  mariadb_connections_emergency_percent: 95
+  redis_memory_warning_percent: 80
+  redis_memory_critical_percent: 90
+  redis_latency_warning_ms: 50
+  openlitespeed_5xx_rate_warning_percent: 5
+  openlitespeed_5xx_rate_critical_percent: 20
+  openlitespeed_min_requests: 100
+  openlitespeed_php_fatal_warning: 5
+  ssh_failed_warning: 50
+  ssh_failed_critical: 500
+  clamav_signature_warning_days: 3
+  clamav_signature_critical_days: 7
+  network_error_rate_warning_per_minute: 10
+  zombie_warning: 20
+
+services:
+  roles:
+    openlitespeed:
+      patterns: [lshttpd, lsws, openlitespeed]
+      units: []
+      required: true
+    cyberpanel:
+      patterns: [lscpd, cyberpanel]
+      units: []
+      required: false
+    mariadb:
+      patterns: [mariadb, mysql, mysqld]
+      units: []
+      required: true
+    redis:
+      patterns: [redis-server, redis]
+      units: []
+      required: false
+    ssh:
+      patterns: [ssh, sshd]
+      units: []
+      required: true
+    fail2ban:
+      patterns: [fail2ban]
+      units: []
+      required: false
+    firewall:
+      patterns: [ufw, firewalld, csf, lfd, nftables]
+      units: []
+      required: false
+    cron:
+      patterns: [cron, crond]
+      units: []
+      required: true
+
+openlitespeed:
+  enabled: auto
+  server_root: /usr/local/lsws
+  config_file: /usr/local/lsws/conf/httpd_config.conf
+  vhost_conf_dir: /usr/local/lsws/conf/vhosts
+  error_log: /usr/local/lsws/logs/error.log
+  access_log: /usr/local/lsws/logs/access.log
+  max_bytes_per_run: 20971520
+  max_lines_per_run: 400000
+
+mariadb:
+  enabled: auto
+  defaults_file: /etc/mysql/debian.cnf # Or /root/.my.cnf
+  timeout_seconds: 15
+
+redis:
+  enabled: auto
+  host: 127.0.0.1
+  port: 6379
+  timeout_seconds: 5
+
+websites:
+  include: []
+  exclude: []
+  max_workers: 4
+  timeout_seconds: 10
+  fallback_scan_home: true
+
+wordpress:
+  enabled: true
+  wp_cli: auto
+  search_subdirs: [wp, blog, wordpress]
+  command_timeout_seconds: 90
+  min_owner_uid: 100
+
+vulnerability:
+  provider: none                      # none or wpscan
+  api_key_file: /etc/shsm/secrets/wpscan_api_key
+
+scanning:
+  quick_scan_daily: true
+  full_scan_weekly: true
+  full_scan_window: "02:00-05:00"
+  max_workers: 2
+  max_file_size_mb: 50
+  max_depth: 20
+  follow_symlinks: false
+  exclude_dirs:
+    - node_modules
+    - vendor
+    - .git
+    - cache
+    - wp-content/cache
+    - wp-content/upgrade
+    - wp-content/backups
+    - wp-content/updraft
+  clamav:
+    enabled: true
+    prefer_daemon: true
+  lynis:
+    enabled: true
+  rootkit:
+    enabled: true
+
+integrity:
+  paths:
+    - /etc/passwd
+    - /etc/group
+    - /etc/sudoers
+    - /etc/sudoers.d/
+    - /etc/ssh/
+    - /etc/crontab
+    - /etc/cron.d/
+    - /etc/systemd/system/
+    - /etc/hosts
+    - /etc/fstab
+
+alerts:
+  enabled: true
+  min_severity: CRITICAL
+  min_confidence: MEDIUM
+  cooldown_minutes: 60
+  recovery_notifications: true
+
+retention:
+  raw_metrics_days: 30
+  hourly_rollup_days: 90
+  daily_rollup_months: 12
+  findings_days: 365
+  reports_days: 365
+  integrity_days: 180
+  backup_keep: 14

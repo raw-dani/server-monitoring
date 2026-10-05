@@ -1,0 +1,13 @@
+[Unit]
+Description=SHSM SSH authentication log aggregation and Fail2Ban log summary
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml security audit --scope logs
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for CPU/RAM/swap/disk/network/process metrics
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=shsm-health.service
+
+[Install]
+WantedBy=timers.target

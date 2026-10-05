@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for SSH authentication log aggregation and Fail2Ban log summary
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* *:3/10:00
+Persistent=true
+Unit=shsm-audit-logs.service
+
+[Install]
+WantedBy=timers.target

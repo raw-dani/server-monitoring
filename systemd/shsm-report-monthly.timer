@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for Monthly HTML/PDF report
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-01 07:00:00 Asia/Jakarta
+Persistent=true
+Unit=shsm-report-monthly.service
+
+[Install]
+WantedBy=timers.target

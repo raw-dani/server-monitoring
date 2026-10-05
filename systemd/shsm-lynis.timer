@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for Weekly Lynis audit
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=Sat *-*-* 03:00:00
+Persistent=true
+Unit=shsm-lynis.service
+
+[Install]
+WantedBy=timers.target

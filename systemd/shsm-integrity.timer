@@ -1,0 +1,12 @@
+[Unit]
+Description=SHSM timer for Incremental file integrity check
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* 00/8:20:00
+Persistent=true
+RandomizedDelaySec=120
+Unit=shsm-integrity.service
+
+[Install]
+WantedBy=timers.target

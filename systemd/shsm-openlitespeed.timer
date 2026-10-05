@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for OpenLiteSpeed log parsing
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* *:2/5:00
+Persistent=true
+Unit=shsm-openlitespeed.service
+
+[Install]
+WantedBy=timers.target

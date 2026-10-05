@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for SQLite backup
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* 05:00:00
+Persistent=true
+Unit=shsm-db-backup.service
+
+[Install]
+WantedBy=timers.target

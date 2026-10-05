@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for CyberPanel website discovery
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* 00/6:05:00
+Persistent=true
+Unit=shsm-websites-discover.service
+
+[Install]
+WantedBy=timers.target

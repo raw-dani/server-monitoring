@@ -1,0 +1,17 @@
+# Server Health & Security Monitoring (SHSM) - Paths Reference
+
+paths:
+  data_dir: /var/lib/shsm
+  log_dir: /var/log/shsm
+  config_dir: /etc/shsm
+  report_dir: /var/lib/shsm/reports
+  cache_dir: /var/cache/shsm
+  rules_dir: /etc/shsm/rules
+  lock_dir: /run/shsm
+
+secrets:
+  smtp_password: /etc/shsm/secrets/smtp_password
+  external_token: /etc/shsm/secrets/external_token
+  redis_password: /etc/shsm/secrets/redis_password
+  mariadb_defaults: /etc/mysql/debian.cnf
+  wpscan_api_key: /etc/shsm/secrets/wpscan_api_key

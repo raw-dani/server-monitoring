@@ -1,0 +1,13 @@
+[Unit]
+Description=SHSM systemd service monitoring
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=shsm
+Group=shsm
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml collect services
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal

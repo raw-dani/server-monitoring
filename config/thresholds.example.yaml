@@ -1,0 +1,68 @@
+# Server Health & Security Monitoring (SHSM) - Thresholds Reference
+
+thresholds:
+  # CPU & Load
+  cpu_warning: 80
+  cpu_critical: 90
+  cpu_emergency: 95
+  load_per_cpu_warning: 1.5
+  load_per_cpu_critical: 3.0
+  load_per_cpu_emergency: 5.0
+  cpu_steal_warning: 5
+  cpu_steal_critical: 10
+  cpu_steal_emergency: 25
+  cpu_iowait_warning: 20
+  cpu_iowait_critical: 40
+  cpu_iowait_emergency: 60
+
+  # Memory & Swap (Available Memory: lower is worse)
+  memory_available_warning_percent: 20
+  memory_available_critical_percent: 10
+  memory_available_emergency_percent: 5
+  swap_warning: 50
+  swap_critical: 75
+  swap_emergency: 90
+
+  # Disk & Inodes
+  disk_warning_percent: 80
+  disk_critical_percent: 90
+  disk_emergency_percent: 95
+  inode_warning_percent: 80
+  inode_critical_percent: 90
+  inode_emergency_percent: 95
+  disk_growth_warning_percent_per_day: 5
+  log_growth_warning_mb_per_day: 1024
+
+  # SSL Expiration (Days remaining: lower is worse)
+  ssl_warning_days: 30
+  ssl_high_days: 14
+  ssl_critical_days: 7
+
+  # Website HTTP
+  website_response_warning_seconds: 3.0
+  website_response_critical_seconds: 8.0
+  website_failures_before_critical: 2
+
+  # MariaDB
+  mariadb_connections_warning_percent: 80
+  mariadb_connections_critical_percent: 90
+  mariadb_connections_emergency_percent: 95
+
+  # Redis
+  redis_memory_warning_percent: 80
+  redis_memory_critical_percent: 90
+  redis_latency_warning_ms: 50
+
+  # OpenLiteSpeed
+  openlitespeed_5xx_rate_warning_percent: 5
+  openlitespeed_5xx_rate_critical_percent: 20
+  openlitespeed_min_requests: 100
+  openlitespeed_php_fatal_warning: 5
+
+  # Security & System
+  ssh_failed_warning: 50
+  ssh_failed_critical: 500
+  clamav_signature_warning_days: 3
+  clamav_signature_critical_days: 7
+  network_error_rate_warning_per_minute: 10
+  zombie_warning: 20

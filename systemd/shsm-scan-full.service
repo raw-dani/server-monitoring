@@ -1,0 +1,16 @@
+[Unit]
+Description=SHSM Weekly heuristic + ClamAV full scan (low-traffic window)
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml security scan --profile full --only heuristic,clamav
+TimeoutStartSec=14400
+StandardOutput=journal
+StandardError=journal
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

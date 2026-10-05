@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for SSH config, firewall, Fail2Ban, listening ports, patches
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* *:17:00
+Persistent=true
+Unit=shsm-audit-host.service
+
+[Install]
+WantedBy=timers.target

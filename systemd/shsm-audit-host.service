@@ -1,0 +1,13 @@
+[Unit]
+Description=SHSM SSH config, firewall, Fail2Ban, listening ports, patches
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml security audit --scope host
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal

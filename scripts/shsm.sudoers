@@ -1,0 +1,27 @@
+# Sudoers configuration for SHSM (Server Health & Security Monitoring)
+# Allows user 'shsm' to run strictly read-only diagnostics and non-root WP-CLI switches.
+# Place in /etc/sudoers.d/shsm and ensure 0440 permissions.
+
+# 1. Systemctl status / is-active checks (strictly read-only)
+shsm ALL=(ALL) NOPASSWD: /bin/systemctl status *, /bin/systemctl is-active *, /bin/systemctl show *
+
+# 2. Journalctl log reading (strictly read-only)
+shsm ALL=(ALL) NOPASSWD: /bin/journalctl *
+
+# 3. Security scanners & auditing tools
+shsm ALL=(ALL) NOPASSWD: /usr/bin/lynis audit system *
+shsm ALL=(ALL) NOPASSWD: /usr/bin/rkhunter --check *
+shsm ALL=(ALL) NOPASSWD: /usr/bin/chkrootkit *
+shsm ALL=(ALL) NOPASSWD: /usr/bin/clamscan *, /usr/bin/clamdscan *
+
+# 4. Firewall inspection (read-only)
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/ufw status *
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/csf -l
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/nft list ruleset
+
+# 5. Fail2ban status (read-only)
+shsm ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status *
+
+# 6. Least-privilege WP-CLI invocation as site owner (never as root!)
+# Allows shsm to run wp-cli as any website user (e.g. sudo -u user123 wp ...)
+shsm ALL=(ALL) NOPASSWD: /usr/local/bin/wp *

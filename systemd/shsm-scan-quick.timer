@@ -1,0 +1,11 @@
+[Unit]
+Description=SHSM timer for Daily heuristic + ClamAV quick scan
+Documentation=https://github.com/gmteknologi/shsm
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+Unit=shsm-scan-quick.service
+
+[Install]
+WantedBy=timers.target
