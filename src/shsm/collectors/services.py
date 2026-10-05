@@ -68,7 +68,7 @@ def discover_unit_for_role(ctx: Context, role: str, spec: Dict[str, Any]) -> Opt
         parts = line.split()
         if not parts:
             continue
-        unit_name = parts[0]
+        unit_name = parts[1] if parts[0] in ("●", "*") and len(parts) > 1 else parts[0]
         base_name = unit_name.removesuffix(".service").lower()
         for pat in patterns:
             pat_lower = pat.lower()
@@ -262,7 +262,8 @@ def _check_failed_units(ctx: Context, out: CollectorOutput) -> None:
     for line in res.stdout.splitlines():
         parts = line.split()
         if parts:
-            failed_units.append(parts[0])
+            name = parts[1] if parts[0] in ("●", "*") and len(parts) > 1 else parts[0]
+            failed_units.append(name)
 
     out.metric("systemd.failed_units_count", len(failed_units))
 
