@@ -71,6 +71,6 @@ sudo -u shsm shsm external send
 
 ### Inspect Heartbeat Timer Status
 ```bash
-systemctl status shsm-external-heartbeat.timer
-journalctl -u shsm-external-heartbeat.service -n 20 --no-pager
+systemctl status shsm-heartbeat.timer
+journalctl -u shsm-heartbeat.service -n 20 --no-pager
 ```

@@ -256,7 +256,21 @@ Supported Backends:
 - **`iptables`**: Direct netfilter packet inspection (`iptables -L -n`).
 - **`nftables`**: Modern Linux packet classification (`nft list ruleset`).
 - **`custom`**: Runs an arbitrary status check array defined in `firewall_custom_cmd`.
-- **`none`**: Disables firewall presence checks if the VPS uses an external cloud provider security group (e.g. AWS Security Group / DigitalOcean Cloud Firewall).
+### Periodic Reports & Formats (HTML & PDF)
+SHSM secara berkala mengompilasi laporan eksekutif mingguan dan bulanan:
+```yaml
+paths:
+  report_dir: "/var/lib/shsm/reports"  # Folder penyimpanan artefak report (weekly & monthly)
+```
+
+- **Output Format**:
+  - **HTML (`.html`)**: Template HTML responsif mandiri (*self-contained inline CSS*) yang disematkan langsung sebagai *body* email.
+  - **PDF (`.pdf`)**: Dokumen cetak multi-halaman berstandar profesional yang digenerate langsung oleh modul Python ReportLab, dan otomatis dilampirkan (*attachment*) pada email laporan.
+- **Isi Laporan**:
+  - Skor Kesehatan (*Health Score*) & Keamanan (*Security Score*) beserta cakupan persentasenya (*coverage %*).
+  - Breakdown status per subsistem (*CPU, RAM, Disk, Database, Web & SSL, SSH, Firewall, WP Security*).
+  - Ringkasan temuan terbuka (*Active Open Findings*) berprioritas tinggi.
+  - Status ketersediaan website dan masa berlaku sertifikat SSL.
 
 ---
 

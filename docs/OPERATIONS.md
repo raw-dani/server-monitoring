@@ -286,7 +286,7 @@ sudo systemctl reset-failed 'shsm-*'
 ### Menjalankan Salah Satu Pekerjaan Terjadwal Secara Manual
 ```bash
 sudo systemctl start shsm-health.service
-sudo systemctl start shsm-security-audit.service
+sudo systemctl start shsm-audit-host.service
 ```
 
 ### Melihat Log Aktivitas Real-Time

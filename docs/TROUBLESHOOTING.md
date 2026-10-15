@@ -165,5 +165,5 @@ tail -f /var/log/shsm/shsm.log
 
 # Log journal unit systemd SHSM
 journalctl -u shsm-health.service -n 50 --no-pager
-journalctl -u shsm-security-audit.service -n 50 --no-pager
+journalctl -u shsm-audit-host.service -n 50 --no-pager
 ```
