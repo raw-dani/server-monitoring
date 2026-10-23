@@ -24,6 +24,13 @@ _PHP_MEM = re.compile(r"(?i)Allowed memory size of \d+ bytes exhausted")
 _UPSTREAM_TIMEOUT = re.compile(r"(?i)timed out|connection refused|broken pipe|upstream error")
 _SSL_HANDSHAKE = re.compile(r"(?i)SSL handshake failed|SSL_accept failed|alert certificate")
 
+# Suspicious URI or attack pattern targeting PHP RCE / PHP2Shell
+_EXPLOIT_URI_PATTERN = re.compile(
+    r"(?i)(?:\/wp-content\/uploads\/[^\s\?]+\.(?:php|phtml|php\d|pht)\b"
+    r"|php:\/\/input|data:\/\/text\/plain"
+    r"|\b(?:c99|r57|b374k|wso|alfa|php2shell|webshell|cmd\.php|shell\.php)\b)"
+)
+
 
 def collect_process_metrics(ctx: Context, out: CollectorOutput) -> None:
     proc_names = ctx.config.get("openlitespeed.process_names", ["openlitespeed", "lshttpd", "litespeed", "lsphp"])
@@ -56,11 +63,14 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
     status_counts: Dict[str, int] = {"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0, "other": 0}
     c_5xx = 0
     c_4xx = 0
+    suspicious_requests: List[Dict[str, str]] = []
 
     for line in lines:
         m = _ACCESS_LOG_LINE.search(line)
         if m:
             code = m.group("status")
+            path = m.group("path")
+            ip = m.group("ip")
             if code.startswith("2"):
                 status_counts["2xx"] += 1
             elif code.startswith("3"):
@@ -74,11 +84,15 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
             else:
                 status_counts["other"] += 1
 
+            if _EXPLOIT_URI_PATTERN.search(path):
+                suspicious_requests.append({"ip": ip, "path": path, "status": code})
+
     return {
         "total": total_reqs,
         "5xx": c_5xx,
         "4xx": c_4xx,
         "counts": status_counts,
+        "suspicious": suspicious_requests,
     }
 
 
@@ -173,6 +187,39 @@ def collect(ctx: Context) -> CollectorOutput:
                 CATEGORY,
                 CheckStatus.PASS,
                 f"HTTP 5xx rate normal ({rate_5xx:.1f}% over {total} requests)",
+                source=SOURCE,
+            )
+
+        # Suspicious exploit request detection (PHP2Shell / RCE / Webshell attempts)
+        suspicious = acc_info.get("suspicious", [])
+        out.metric("openlitespeed.suspicious_requests", len(suspicious))
+        if suspicious:
+            sample = suspicious[0]
+            out.check(
+                "openlitespeed.exploit_attempts",
+                CATEGORY,
+                CheckStatus.CRITICAL,
+                f"Detected {len(suspicious)} suspicious exploit request(s) targeting PHP2Shell/webshells",
+                source=SOURCE,
+            )
+            out.finding(
+                "openlitespeed.exploit_attempts",
+                "security",
+                Severity.CRITICAL,
+                Confidence.CONFIRMED,
+                f"Suspicious exploit request detected in OpenLiteSpeed access log",
+                f"Detected {len(suspicious)} request(s) matching known PHP2Shell/webshell injection paths. Example: IP {sample.get('ip')} requested '{sample.get('path')}' (status: {sample.get('status')}).",
+                "Review the requesting IP in firewall/Fail2Ban, quarantine any files created at that path, and ensure PHP execution in uploads is blocked.",
+                asset=sample.get("ip", "network"),
+                source=SOURCE,
+                key=f"ols:exploit:{sample.get('ip')}:{sample.get('path')}",
+            )
+        else:
+            out.check(
+                "openlitespeed.exploit_attempts",
+                CATEGORY,
+                CheckStatus.PASS,
+                "No suspicious PHP/webshell exploit attempts in access log",
                 source=SOURCE,
             )
 

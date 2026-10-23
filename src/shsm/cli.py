@@ -372,10 +372,11 @@ def cmd_security_audit(click_ctx: click.Context, scope: str) -> None:
             from shsm.security import ssh
             out.merge(ssh.collect(app_ctx))
         else:
-            from shsm.security import fail2ban, firewall, ssh, vulnerability
+            from shsm.security import fail2ban, firewall, php_audit, ssh, vulnerability
             out.merge(ssh.collect(app_ctx))
             out.merge(firewall.collect(app_ctx))
             out.merge(fail2ban.collect(app_ctx))
+            out.merge(php_audit.collect(app_ctx))
             out.merge(vulnerability.check_vulnerabilities(app_ctx))
         return out
 

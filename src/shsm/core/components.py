@@ -57,6 +57,7 @@ PREFIX_COMPONENT: List[Tuple[str, Optional[str]]] = [
     ("systemd.", "system_integrity"),
     ("vulnerability.", "vulnerability"),
     ("patch.", "vulnerability"),
+    ("php.", "vulnerability"),
     ("shsm.", None),
 ]
 

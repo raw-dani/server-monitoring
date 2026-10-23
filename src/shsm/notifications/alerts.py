@@ -23,6 +23,8 @@ CRITICAL_CHECK_IDS = {
     "ssl.certificate",
     "website.http",
     "website.dns",
+    "php.security",
+    "openlitespeed.exploit_attempts",
 }
 
 
