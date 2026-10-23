@@ -59,6 +59,8 @@ class Database:
                 conn.close()
                 raise DatabaseError(f"database {self.path} is unreadable or corrupt: {exc}") from exc
         conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA wal_autocheckpoint = 1000")
+        conn.execute("PRAGMA cache_size = -8000")  # Limit SQLite cache to 8MB max
         if created:
             try:
                 os.chmod(self.path, 0o660)

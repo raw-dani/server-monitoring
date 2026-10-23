@@ -11,7 +11,26 @@ from shsm.deploy.schedule import JOBS, JobDef
 def generate_service_unit(job: JobDef, bin_path: str = "/opt/shsm/venv/bin/shsm", cfg_path: str = "/etc/shsm/config.yaml") -> str:
     args_str = " ".join(job.argv)
     user_line = "User=root\nGroup=root" if job.root else "User=shsm\nGroup=shsm"
-    nice_line = "Nice=19\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7" if job.heavy else ""
+    
+    # Resource control & throttling to prevent server overload
+    resource_lines = []
+    if job.heavy:
+        resource_lines.extend([
+            "Nice=19",
+            "IOSchedulingClass=best-effort",
+            "IOSchedulingPriority=7",
+            "CPUQuota=40%",
+            "MemoryHigh=384M",
+            "MemoryMax=512M",
+            "IOWeight=100",
+        ])
+    else:
+        resource_lines.extend([
+            "Nice=10",
+            "CPUQuota=60%",
+            "MemoryHigh=256M",
+            "MemoryMax=384M",
+        ])
 
     lines = [
         "[Unit]",
@@ -27,8 +46,7 @@ def generate_service_unit(job: JobDef, bin_path: str = "/opt/shsm/venv/bin/shsm"
         "StandardOutput=journal",
         "StandardError=journal",
     ]
-    if nice_line:
-        lines.append(nice_line)
+    lines.extend(resource_lines)
     return "\n".join(lines) + "\n"
 
 
