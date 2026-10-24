@@ -15,11 +15,15 @@ SOURCE = "psutil"
 SUSPICIOUS_EXE_PREFIXES = ("/tmp/", "/var/tmp/", "/dev/shm/", "/run/user/")
 
 
+_USER_CACHE: Dict[int, str] = {}
+
+
 class ProcessSampler:
     """Prime per-process CPU counters, then report the top consumers after a measurement interval."""
 
     def __init__(self) -> None:
         self.procs: List[psutil.Process] = []
+        self._primed: bool = False
 
     def prime(self) -> None:
         self.procs = []
@@ -29,40 +33,81 @@ class ProcessSampler:
                 self.procs.append(p)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
+        self._primed = True
 
     def snapshot(self) -> List[Dict[str, Any]]:
         rows = []
         for p in self.procs:
             try:
                 with p.oneshot():
+                    pid = p.pid
+                    try:
+                        name = p.name()
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        name = f"proc_{pid}"
+                    user = _safe_user(p)
+                    try:
+                        cpu_val = p.cpu_percent(None)
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        cpu_val = 0.0
+                    try:
+                        rss_val = p.memory_info().rss
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        rss_val = 0
+                    try:
+                        status_val = p.status()
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        status_val = "unknown"
+
                     rows.append({
-                        "pid": p.pid,
-                        "name": p.name(),
-                        "user": _safe_user(p),
-                        "cpu": p.cpu_percent(None),
-                        "rss": p.memory_info().rss,
-                        "status": p.status(),
+                        "pid": pid,
+                        "name": name,
+                        "user": user,
+                        "cpu": cpu_val,
+                        "rss": rss_val,
+                        "status": status_val,
                     })
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 continue
         return rows
 
 
 def _safe_user(p: psutil.Process) -> str:
     try:
-        return p.username()
-    except (psutil.AccessDenied, KeyError, psutil.NoSuchProcess):
+        uids = p.uids()
+        uid = uids.real
+        if uid in _USER_CACHE:
+            return _USER_CACHE[uid]
+        uname = p.username()
+        _USER_CACHE[uid] = uname
+        return uname
+    except (psutil.AccessDenied, KeyError, psutil.NoSuchProcess, AttributeError):
         return "?"
 
 
 def top_by(rows: List[Dict[str, Any]], key: str, n: int) -> List[Dict[str, Any]]:
-    return sorted(rows, key=lambda r: r[key], reverse=True)[:n]
+    return sorted(rows, key=lambda r: r.get(key, 0.0) if r.get(key) is not None else 0.0, reverse=True)[:n]
 
 
 def format_top(rows: List[Dict[str, Any]], key: str) -> str:
     if key == "cpu":
-        return ", ".join(f"{r['name']}[{r['pid']}] {r['cpu']:.0f}%" for r in rows)
-    return ", ".join(f"{r['name']}[{r['pid']}] {r['rss'] / 1048576:.0f} MiB" for r in rows)
+        # Only report processes with real, measurable CPU consumption (>= 0.5%)
+        # Exclude shsm/python from self-reporting as a culprit if its CPU is minimal (< 5.0%)
+        meaningful = [
+            r for r in rows
+            if (r.get("cpu") or 0.0) >= 0.5
+            and not (r.get("name") in ("shsm", "python", "python3") and (r.get("cpu") or 0.0) < 5.0)
+        ]
+        if not meaningful:
+            if len(rows) <= 3:
+                return "insufficient privileges to inspect all user processes (/proc restricted; check 'top' via SSH)"
+            return "none active during 1s sample (likely short-lived PHP/cron bursts)"
+        return ", ".join(f"{r['name']}[{r['pid']}] {r['cpu']:.0f}%" for r in meaningful)
+    # Memory: only report processes with actual RSS usage
+    meaningful_mem = [r for r in rows if (r.get("rss") or 0) > 1048576]
+    if not meaningful_mem:
+        return "none reported"
+    return ", ".join(f"{r['name']}[{r['pid']}] {r['rss'] / 1048576:.0f} MiB" for r in meaningful_mem)
 
 
 def collect_processes(ctx: Context, rows: List[Dict[str, Any]]) -> CollectorOutput:

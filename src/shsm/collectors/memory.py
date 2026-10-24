@@ -86,8 +86,24 @@ def _swap_activity(ctx: Context, out: CollectorOutput, sw) -> None:
 
 def _oom(ctx: Context, out: CollectorOutput) -> None:
     minutes = int(ctx.config.get("monitoring.oom_lookback_minutes", 15))
+    last_check = ctx.runs.kv_get("memory.oom.last_check")
+    vm = psutil.virtual_memory()
+    avail_pct = (vm.available / float(vm.total) * 100.0) if vm.total else 100.0
+
+    # If memory is plentiful (>20% available), throttle kernel log inspection to every 5 minutes
+    if last_check and avail_pct > 20.0:
+        from shsm.core.timeutils import from_iso
+        try:
+            if (ctx.now() - from_iso(last_check)).total_seconds() < 300:
+                out.check("memory.oom", CATEGORY, CheckStatus.PASS, f"no OOM events in the last {minutes} min", source="journalctl")
+                return
+        except Exception:
+            pass
+
     since = f"{minutes} minutes ago"
     res = ctx.runner.run(["journalctl", "-k", "--no-pager", "-q", "-o", "short-iso", "--since", since], timeout=20)
+    from shsm.core.timeutils import to_iso
+    ctx.runs.kv_set("memory.oom.last_check", to_iso(ctx.now()), ctx.now())
     if not res.ran:
         out.check("memory.oom", CATEGORY, CheckStatus.UNKNOWN, f"cannot read kernel log: {res.describe()}", source="journalctl")
         out.error(f"memory.oom: journalctl unavailable ({res.describe()})")

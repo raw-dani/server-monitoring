@@ -19,17 +19,19 @@ def generate_service_unit(job: JobDef, bin_path: str = "/opt/shsm/venv/bin/shsm"
             "Nice=19",
             "IOSchedulingClass=best-effort",
             "IOSchedulingPriority=7",
-            "CPUQuota=40%",
-            "MemoryHigh=384M",
-            "MemoryMax=512M",
+            "CPUQuota=30%",
+            "MemoryHigh=256M",
+            "MemoryMax=384M",
             "IOWeight=100",
         ])
     else:
         resource_lines.extend([
             "Nice=10",
-            "CPUQuota=60%",
-            "MemoryHigh=256M",
-            "MemoryMax=384M",
+            "IOSchedulingClass=best-effort",
+            "IOSchedulingPriority=6",
+            "CPUQuota=40%",
+            "MemoryHigh=192M",
+            "MemoryMax=256M",
         ])
 
     lines = [

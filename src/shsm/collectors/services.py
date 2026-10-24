@@ -44,7 +44,12 @@ def _show_unit(ctx: Context, unit: str) -> Optional[Dict[str, str]]:
     return info
 
 
-def discover_unit_for_role(ctx: Context, role: str, spec: Dict[str, Any]) -> Optional[str]:
+def discover_unit_for_role(
+    ctx: Context,
+    role: str,
+    spec: Dict[str, Any],
+    all_units: Optional[List[str]] = None,
+) -> Optional[str]:
     """Find active or installed systemd unit matching configured units or pattern list."""
     configured_units = spec.get("units", [])
     for u in configured_units:
@@ -56,19 +61,24 @@ def discover_unit_for_role(ctx: Context, role: str, spec: Dict[str, Any]) -> Opt
     if not patterns:
         return None
 
-    # Query systemctl list-units to find matching active or loaded services
-    res = ctx.runner.run(
-        ["systemctl", "list-units", "--type=service", "--all", "--no-legend", "--no-pager"],
-        timeout=15,
-    )
-    if not res.ok:
-        return None
+    unit_names = all_units
+    if unit_names is None:
+        # Query systemctl list-units if not pre-fetched
+        res = ctx.runner.run(
+            ["systemctl", "list-units", "--type=service", "--all", "--no-legend", "--no-pager"],
+            timeout=15,
+        )
+        if not res.ok:
+            return None
+        unit_names = []
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            u_name = parts[1] if parts[0] in ("●", "*") and len(parts) > 1 else parts[0]
+            unit_names.append(u_name)
 
-    for line in res.stdout.splitlines():
-        parts = line.split()
-        if not parts:
-            continue
-        unit_name = parts[1] if parts[0] in ("●", "*") and len(parts) > 1 else parts[0]
+    for unit_name in unit_names:
         base_name = unit_name.removesuffix(".service").lower()
         for pat in patterns:
             pat_lower = pat.lower()
@@ -85,9 +95,23 @@ def collect(ctx: Context) -> CollectorOutput:
     roles = ctx.config.get("services.roles", {})
     discovered_units: Dict[str, str] = {}
 
+    # Query systemctl list-units ONCE across all roles to avoid spawning 8+ subprocesses per minute
+    res = ctx.runner.run(
+        ["systemctl", "list-units", "--type=service", "--all", "--no-legend", "--no-pager"],
+        timeout=15,
+    )
+    prefetched_units: List[str] = []
+    if res.ok:
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            u_name = parts[1] if parts[0] in ("●", "*") and len(parts) > 1 else parts[0]
+            prefetched_units.append(u_name)
+
     # 1. Evaluate configured roles
     for role, spec in roles.items():
-        unit = discover_unit_for_role(ctx, role, spec)
+        unit = discover_unit_for_role(ctx, role, spec, all_units=prefetched_units)
         check_id = f"service.{role}"
 
         if not unit:
@@ -303,6 +327,23 @@ def _check_failed_units(ctx: Context, out: CollectorOutput) -> None:
 
 
 def _check_sensitive_unit_files(ctx: Context, out: CollectorOutput) -> None:
+    # Throttle directory scanning to once every 10 minutes to save disk I/O and CPU
+    last_scan = ctx.runs.kv_get("services.unit_files.last_scan")
+    if last_scan:
+        from shsm.core.timeutils import from_iso
+        try:
+            if (ctx.now() - from_iso(last_scan)).total_seconds() < 600:
+                out.check(
+                    "systemd.unit_files",
+                    "security",
+                    CheckStatus.PASS,
+                    "Systemd unit files intact (throttled)",
+                    source=SOURCE,
+                )
+                return
+        except Exception:
+            pass
+
     dirs = ctx.config.get("services.sensitive_unit_dirs", ["/etc/systemd/system"])
     found_files: Set[str] = set()
 
@@ -366,3 +407,5 @@ def _check_sensitive_unit_files(ctx: Context, out: CollectorOutput) -> None:
             f"No unexpected systemd unit files ({len(found_files)} tracked)",
             source=SOURCE,
         )
+    from shsm.core.timeutils import to_iso
+    ctx.runs.kv_set("services.unit_files.last_scan", to_iso(now), now)

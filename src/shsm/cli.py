@@ -21,9 +21,11 @@ from shsm.logging_config import setup_logging
 def get_context(config_path: Optional[str] = None) -> Context:
     cfg = load_config(config_path)
     db = Database(cfg.db_path)
-    # Ensure migrations are applied on start
+    # Ensure migrations are applied only if database is newly initialized
     try:
-        db.migrate()
+        import os
+        if not os.path.exists(cfg.db_path) or os.path.getsize(cfg.db_path) == 0:
+            db.migrate()
     except Exception:
         pass
     setup_logging(

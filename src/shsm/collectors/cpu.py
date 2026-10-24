@@ -19,7 +19,7 @@ CATEGORY = "health"
 def measure(sampler: Optional[ProcessSampler] = None, interval: float = 1.0) -> Dict[str, Any]:
     """Take one CPU measurement over ``interval`` seconds."""
     psutil.cpu_percent(None, percpu=True)  # prime per-core counters
-    if sampler:
+    if sampler and not getattr(sampler, "_primed", False):
         sampler.prime()
     times = psutil.cpu_times_percent(interval=interval)
     per_core = psutil.cpu_percent(None, percpu=True)

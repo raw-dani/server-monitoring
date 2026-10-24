@@ -30,32 +30,28 @@ _EXPLOIT_URI_PATTERN = re.compile(
     r"|php:\/\/input|data:\/\/text\/plain"
     r"|\b(?:c99|r57|b374k|wso|alfa|php2shell|webshell|cmd\.php|shell\.php)\b)"
 )
+_EXPLOIT_HINTS = ("php", "phtml", "pht", "data:", "c99", "r57", "b374k", "wso", "alfa", "shell")
 
 
 def collect_process_metrics(ctx: Context, out: CollectorOutput) -> None:
-    proc_names = ctx.config.get("openlitespeed.process_names", ["openlitespeed", "lshttpd", "litespeed", "lsphp"])
-    matched_procs: List[psutil.Process] = []
-
-    for p in psutil.process_iter():
-        try:
-            name = p.name().lower()
-            if any(target in name for target in proc_names):
-                matched_procs.append(p)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-
+    proc_names = tuple(p.lower() for p in ctx.config.get("openlitespeed.process_names", ["openlitespeed", "lshttpd", "litespeed", "lsphp"]))
+    matched_count = 0
     total_rss = 0
-    total_cpu = 0.0
-    for p in matched_procs:
+
+    for p in psutil.process_iter(attrs=["name", "memory_info"]):
         try:
-            total_rss += p.memory_info().rss
-            total_cpu += p.cpu_percent(None)
+            name = (p.info.get("name") or "").lower()
+            if any(target in name for target in proc_names):
+                matched_count += 1
+                mem = p.info.get("memory_info")
+                if mem:
+                    total_rss += getattr(mem, "rss", 0)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
-    out.metric("openlitespeed.process_count", len(matched_procs))
+    out.metric("openlitespeed.process_count", matched_count)
     out.metric("openlitespeed.memory_bytes", total_rss)
-    out.metric("openlitespeed.cpu_percent", total_cpu)
+    out.metric("openlitespeed.cpu_percent", 0.0)
 
 
 def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
@@ -71,20 +67,22 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
             code = m.group("status")
             path = m.group("path")
             ip = m.group("ip")
-            if code.startswith("2"):
+            first_c = code[0] if code else ""
+            if first_c == "2":
                 status_counts["2xx"] += 1
-            elif code.startswith("3"):
+            elif first_c == "3":
                 status_counts["3xx"] += 1
-            elif code.startswith("4"):
+            elif first_c == "4":
                 status_counts["4xx"] += 1
                 c_4xx += 1
-            elif code.startswith("5"):
+            elif first_c == "5":
                 status_counts["5xx"] += 1
                 c_5xx += 1
             else:
                 status_counts["other"] += 1
 
-            if _EXPLOIT_URI_PATTERN.search(path):
+            path_lower = path.lower()
+            if any(h in path_lower for h in _EXPLOIT_HINTS) and _EXPLOIT_URI_PATTERN.search(path):
                 suspicious_requests.append({"ip": ip, "path": path, "status": code})
 
     return {

@@ -46,12 +46,13 @@ log_info "Updating virtual environment packages..."
 log_info "Applying any pending database migrations..."
 sudo -u "$SHSM_USER" /usr/local/bin/shsm db migrate
 
-# 5. Update systemd units if changed
+# 5. Update systemd units with resource control & quotas
 if [ -d "$SCRIPT_DIR/systemd" ]; then
-    log_info "Syncing systemd unit definitions..."
-    cp -u "$SCRIPT_DIR/systemd/"*.service /etc/systemd/system/ 2>/dev/null || true
-    cp -u "$SCRIPT_DIR/systemd/"*.timer /etc/systemd/system/ 2>/dev/null || true
+    log_info "Syncing systemd unit definitions with CPU and memory throttling..."
+    cp "$SCRIPT_DIR/systemd/"*.service /etc/systemd/system/ 2>/dev/null || true
+    cp "$SCRIPT_DIR/systemd/"*.timer /etc/systemd/system/ 2>/dev/null || true
     systemctl daemon-reload
+    log_ok "Systemd units updated with CPU quotas and reloaded."
 fi
 
 # 6. Verify health

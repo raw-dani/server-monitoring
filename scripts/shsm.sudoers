@@ -2,8 +2,8 @@
 # Allows user 'shsm' to run strictly read-only diagnostics and non-root WP-CLI switches.
 # Place in /etc/sudoers.d/shsm and ensure 0440 permissions.
 
-# 1. Systemctl status / is-active checks (strictly read-only)
-shsm ALL=(ALL) NOPASSWD: /bin/systemctl status *, /bin/systemctl is-active *, /bin/systemctl show *
+# 1. Systemctl status / is-active / show / list-units checks (strictly read-only)
+shsm ALL=(ALL) NOPASSWD: /bin/systemctl status *, /bin/systemctl is-active *, /bin/systemctl show *, /bin/systemctl list-units *, /usr/bin/systemctl status *, /usr/bin/systemctl is-active *, /usr/bin/systemctl show *, /usr/bin/systemctl list-units *
 
 # 2. Journalctl log reading (strictly read-only)
 shsm ALL=(ALL) NOPASSWD: /bin/journalctl *
