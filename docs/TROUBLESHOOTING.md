@@ -156,6 +156,94 @@ sudo -u shsm shsm doctor
 
 ---
 
+### H. Peringatan Penggunaan CPU Darurat (Muncul `shsm 0%` atau Pekerja `lsphp` Tinggi)
+- **Gejala**: Notifikasi email: `[KRITIS] Penggunaan CPU (rata-rata 5 menit) adalah 96.8% (>= 95% ambang batas darurat). Proses teratas: shsm[3224660] 0%`.
+- **Penyebab & Analisis**:
+  1. **Bukan SHSM yang Menghabiskan CPU**: Angka `0%` menunjukkan SHSM sendiri sedang idle saat pengambilan sampel.
+  2. **Isolasi Izin `/proc`**: SHSM berjalan sebagai user non-root `shsm`. Pada lingkungan server CyberPanel / CloudLinux / Ubuntu yang diamankan, proses pekerja PHP (`lsphp`) berjalan di bawah user Linux akun website (misalnya `atone94+`, `rejat44+`). Pada versi lama, penolakan akses saat membaca memori proses user lain menyebabkan proses tersebut terlewat dari sampling dan menyisakan proses SHSM sendiri.
+  3. **Serangan Bot Scanner / Ephemeral Worker Burst**: Bot scanner yang membanjiri request 404 (seperti mencari file kredensial `/.env`, `.git`, atau brute force POST) memaksa OpenLiteSpeed memanggil script WordPress (`index.php`) berulang kali. Setiap pemanggilan WordPress memakan CPU 100%+ per worker PHP (`lsphp`).
+- **Langkah Investigasi**:
+  1. Periksa proses yang paling membebani CPU:
+     ```bash
+     ps aux --sort=-%cpu | head -n 15
+     ```
+  2. Periksa log akses web server untuk mendeteksi bot scanner:
+     ```bash
+     tail -n 100 /usr/local/lsws/logs/access.log
+     ```
+- **Solusi & Penanganan**:
+  1. **Perbarui SHSM**:
+     Terapkan pembaruan kode terbaru dan jalankan upgrade agar SHSM mendapatkan throttling `CPUQuota=40%`, prioritas `Nice=10`, serta pelaporan proses aktif yang akurat:
+     ```bash
+     cd /opt/shsm-src
+     git pull
+     sudo bash scripts/upgrade.sh
+     ```
+  2. **Blokir Scanner `.env` di Level Web Server (`.htaccess`)**:
+     Tambahkan aturan penolakan cepat (*fast 403 Forbidden*) di file `.htaccess` website Anda (sebelum baris `# BEGIN WordPress`) agar OpenLiteSpeed langsung menolak request tanpa menyentuh PHP/WordPress:
+     ```apache
+     # Blokir akses ke file .env dan file konfigurasi sensitif
+     <FilesMatch "^\.env|.*\.env.*$">
+         Order allow,deny
+         Deny from all
+     </FilesMatch>
+
+     RewriteEngine On
+     RewriteRule ^.*\.env.*$ - [F,L]
+     RewriteRule ^(example\.env|.*\.git|.*\.sql)$ - [F,L]
+     ```
+  3. **Blokir Manual IP Penyerang via Firewalld**:
+     Jika menemukan IP agresif di log akses, buang seluruh trafik dari IP tersebut menggunakan zona `drop`:
+     ```bash
+     firewall-cmd --zone=drop --add-source=<IP_PENYERANG> --permanent
+     firewall-cmd --reload
+     ```
+     Untuk melihat daftar IP yang diblokir:
+     ```bash
+     firewall-cmd --zone=drop --list-sources
+     ```
+     Untuk membuka blokir IP jika diperlukan:
+     ```bash
+     firewall-cmd --zone=drop --remove-source=<IP_PENYERANG> --permanent
+     firewall-cmd --reload
+     ```
+  4. **Setup Auto-Ban Otomatis Menggunakan Fail2Ban + Firewalld**:
+     Agar IP yang memindai file `.env` atau URL exploit otomatis diblokir oleh Firewalld:
+     - **Buat filter Fail2Ban** di `/etc/fail2ban/filter.d/ols-scanner.conf`:
+       ```ini
+       [Definition]
+       failregex = ^<HOST> - - \[.*\] "(GET|POST|HEAD) .*(?:\.env|\.git|\.aws|\.sql|\.bak|wp-config\.php|phpmyadmin|eval-stdin\.php).* HTTP/.*" (?:404|403) .*$
+                   ^<HOST> - - \[.*\] "(GET|POST|HEAD) .*\.env.* HTTP/.*" (?:404|403) .*$
+       ignoreregex =
+       ```
+     - **Aktifkan jail Fail2Ban dengan Firewalld** di `/etc/fail2ban/jail.d/ols-scanner.local`:
+       ```ini
+       [ols-scanner]
+       enabled   = true
+       port      = http,https
+       filter    = ols-scanner
+       logpath   = /usr/local/lsws/logs/access.log
+       maxretry  = 3
+       findtime  = 600
+       bantime   = 86400
+       banaction = firewallcmd-richrules
+       action    = %(action_)s
+       ```
+     - **Reload Fail2Ban**:
+       ```bash
+       fail2ban-client reload
+       ```
+     - **Pantau status IP yang terkena auto-ban**:
+       ```bash
+       fail2ban-client status ols-scanner
+       ```
+     - **Membuka blokir IP tertentu dari jail**:
+       ```bash
+       fail2ban-client set ols-scanner unbanip <IP_ADDRESS>
+       ```
+
+---
+
 ## 3. Pemeriksaan Log SHSM
 
 Jika terjadi kejanggalan, pantau log utama SHSM:
