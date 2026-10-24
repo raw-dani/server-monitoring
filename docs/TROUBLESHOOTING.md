@@ -226,7 +226,7 @@ sudo -u shsm shsm doctor
        maxretry  = 3
        findtime  = 600
        bantime   = 86400
-       banaction = firewallcmd-richrules
+       banaction = firewallcmd-rich-rules
        action    = %(action_)s
        ```
      - **Reload Fail2Ban**:
