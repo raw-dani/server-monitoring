@@ -22,8 +22,8 @@ shsm ALL=(ALL) NOPASSWD: /usr/sbin/iptables -L *, /sbin/iptables -L *, /usr/bin/
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables -L *, /sbin/ip6tables -L *, /usr/bin/ip6tables -L *
 shsm ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd --state, /usr/bin/firewall-cmd --list-all *
 
-# 5. Fail2ban status (read-only)
-shsm ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status, /usr/bin/fail2ban-client status *
+# 5. Fail2ban status & IP ban management
+shsm ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status, /usr/bin/fail2ban-client status *, /usr/bin/fail2ban-client set * banip *, /usr/bin/fail2ban-client set * unbanip *, /usr/bin/fail2ban-client unban *
 
 # 6. Least-privilege WP-CLI invocation as site owner (never as root!)
 # Allows shsm to run wp-cli as any website user (e.g. sudo -u user123 wp ...)

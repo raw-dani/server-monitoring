@@ -272,6 +272,9 @@ DEFAULTS: Dict[str, Any] = {
         "apt_check": True,
         "firewall_backend": "auto",  # auto | csf | firewalld | ufw | iptables | nftables | custom | none
         "firewall_custom_cmd": [],
+        "fail2ban_auto_block": True,
+        "fail2ban_block_jail": "auto",  # 'auto' or specific jail name like 'ols-scanner'
+        "ip_whitelist": ["127.0.0.1", "::1"],
     },
     "alerts": {
         "enabled": True,

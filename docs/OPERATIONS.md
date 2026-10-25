@@ -112,6 +112,19 @@ sudo -u shsm shsm security scan --only heuristic
 sudo -u shsm shsm security scan --only clamav,rootkit
 ```
 
+### Manajemen Blokir IP (Fail2Ban Active Response)
+SHSM dapat langsung memerintahkan Fail2Ban untuk memblokir atau membuka blokir IP mencurigakan/penyerang:
+```bash
+# Blokir IP penyerang ke Fail2Ban secara instan
+sudo -u shsm shsm ban <IP_ADDRESS>
+
+# Tentukan jail tertentu (opsional, default: auto-detect ols-scanner / openlitespeed)
+sudo -u shsm shsm ban <IP_ADDRESS> --jail ols-scanner
+
+# Buka blokir IP
+sudo -u shsm shsm unban <IP_ADDRESS>
+```
+
 ---
 
 ## 5. Manajemen Temuan Masalah (Findings)

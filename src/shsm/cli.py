@@ -700,5 +700,40 @@ def cmd_findings_resolve(click_ctx: click.Context, ident: str, note: str) -> Non
         click.secho(f"Finding {ident} not found.", fg="red")
 
 
+# ---------------------------------------------------------------- firewall & fail2ban actions
+@main.command("ban")
+@click.argument("ip")
+@click.option("--jail", default="auto", help="Target Fail2Ban jail (default: auto)")
+@click.pass_context
+def cmd_ban(click_ctx: click.Context, ip: str, jail: str) -> None:
+    """Ban an abusive or suspicious IP address via Fail2Ban."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.security import fail2ban
+
+    ok, msg = fail2ban.ban_ip(app_ctx, ip, jail=jail)
+    if ok:
+        click.secho(f"[SUCCESS] {msg}", fg="green", bold=True)
+    else:
+        click.secho(f"[FAILED] {msg}", fg="red", bold=True)
+        sys.exit(1)
+
+
+@main.command("unban")
+@click.argument("ip")
+@click.option("--jail", default="auto", help="Target Fail2Ban jail (default: auto/all)")
+@click.pass_context
+def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
+    """Unban an IP address from Fail2Ban."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.security import fail2ban
+
+    ok, msg = fail2ban.unban_ip(app_ctx, ip, jail=jail)
+    if ok:
+        click.secho(f"[SUCCESS] {msg}", fg="green", bold=True)
+    else:
+        click.secho(f"[FAILED] {msg}", fg="red", bold=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()

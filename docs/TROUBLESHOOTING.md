@@ -242,6 +242,18 @@ sudo -u shsm shsm doctor
        fail2ban-client set ols-scanner unbanip <IP_ADDRESS>
        ```
 
+  5. **Auto-Ban Otomatis via SHSM (Active Defense)**:
+     SHSM kini dilengkapi fitur *Active Defense* yang langsung memerintahkan Fail2Ban memblokir IP penyerang secara otomatis begitu request eksploitasi (seperti `/alfa.php` atau `php://input`) terdeteksi di log akses:
+     - Fitur ini aktif secara default (`security.fail2ban_auto_block: true`).
+     - Anda juga bisa memblokir atau membuka blokir IP secara langsung melalui CLI SHSM:
+       ```bash
+       # Blokir IP langsung ke Fail2Ban:
+       sudo -u shsm shsm ban 20.194.17.163
+
+       # Buka blokir IP:
+       sudo -u shsm shsm unban 20.194.17.163
+       ```
+
 ---
 
 ## 3. Pemeriksaan Log SHSM

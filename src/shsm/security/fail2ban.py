@@ -140,3 +140,110 @@ def collect(ctx: Context) -> CollectorOutput:
     out.check("fail2ban.status", CATEGORY, CheckStatus.PASS, summary_str, source=SOURCE)
 
     return out
+
+
+def is_valid_ip(ip: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_address(ip.strip())
+        return True
+    except ValueError:
+        return False
+
+
+def get_active_jails(ctx: Context) -> List[str]:
+    client_bin = ctx.runner.which("fail2ban-client")
+    if not client_bin:
+        return []
+    res = _run_with_sudo_fallback(ctx, [client_bin, "status"], timeout=10)
+    if not res.ok:
+        return []
+    jails = []
+    for line in res.stdout.splitlines():
+        if "Jail list:" in line:
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                jails = [j.strip() for j in parts[1].split(",") if j.strip()]
+    return jails
+
+
+def ban_ip(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple[bool, str]:
+    """Instruct Fail2Ban to block an offending IP address in an active jail."""
+    import ipaddress
+    import logging
+
+    log = logging.getLogger(__name__)
+    clean_ip = ip.strip()
+
+    if not is_valid_ip(clean_ip):
+        return False, f"Invalid IP address format: {ip}"
+
+    # Protect loopback, private addresses, and configured whitelist
+    whitelist = set(ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
+    if clean_ip in whitelist:
+        return False, f"IP {clean_ip} is in whitelist; refusing to ban"
+
+    try:
+        ip_obj = ipaddress.ip_address(clean_ip)
+        if ip_obj.is_private or ip_obj.is_loopback:
+            return False, f"IP {clean_ip} is a private/loopback address; refusing to ban"
+    except ValueError:
+        pass
+
+    client_bin = ctx.runner.which("fail2ban-client")
+    if not client_bin:
+        return False, "fail2ban-client binary not found in PATH"
+
+    target_jail = jail
+    if not target_jail or target_jail == "auto":
+        jails = get_active_jails(ctx)
+        if not jails:
+            return False, "No active Fail2Ban jail found to apply ban"
+        # Prioritize web/scanner jails if available
+        preferred_jails = ["ols-scanner", "openlitespeed", "apache-badbots", "nginx-botsearch", "recidive"]
+        for pj in preferred_jails:
+            if pj in jails:
+                target_jail = pj
+                break
+        if not target_jail:
+            target_jail = jails[0]
+
+    res = _run_with_sudo_fallback(ctx, [client_bin, "set", target_jail, "banip", clean_ip], timeout=15)
+    if res.ok:
+        log.info("Successfully banned IP %s in Fail2Ban jail '%s'", clean_ip, target_jail)
+        return True, f"Successfully banned {clean_ip} in Fail2Ban jail '{target_jail}'"
+
+    return False, f"Fail2Ban command failed for {clean_ip} in jail '{target_jail}': {res.stderr or res.stdout}"
+
+
+def unban_ip(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple[bool, str]:
+    """Instruct Fail2Ban to unban an IP address."""
+    import logging
+
+    log = logging.getLogger(__name__)
+    clean_ip = ip.strip()
+
+    if not is_valid_ip(clean_ip):
+        return False, f"Invalid IP address format: {ip}"
+
+    client_bin = ctx.runner.which("fail2ban-client")
+    if not client_bin:
+        return False, "fail2ban-client binary not found in PATH"
+
+    if jail and jail != "auto":
+        res = _run_with_sudo_fallback(ctx, [client_bin, "set", jail, "unbanip", clean_ip], timeout=15)
+    else:
+        # Try global unban command supported in modern fail2ban
+        res = _run_with_sudo_fallback(ctx, [client_bin, "unban", clean_ip], timeout=15)
+        if not res.ok:
+            # Fallback: unban across all active jails
+            jails = get_active_jails(ctx)
+            for j in jails:
+                _run_with_sudo_fallback(ctx, [client_bin, "set", j, "unbanip", clean_ip], timeout=10)
+            return True, f"Sent unban request for {clean_ip} across active jails"
+
+    if res.ok:
+        log.info("Successfully unbanned IP %s", clean_ip)
+        return True, f"Successfully unbanned {clean_ip}"
+
+    return False, f"Fail2Ban unban command failed for {clean_ip}: {res.stderr or res.stdout}"

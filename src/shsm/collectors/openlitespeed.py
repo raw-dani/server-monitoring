@@ -192,7 +192,21 @@ def collect(ctx: Context) -> CollectorOutput:
         suspicious = acc_info.get("suspicious", [])
         out.metric("openlitespeed.suspicious_requests", len(suspicious))
         if suspicious:
+            from shsm.security import fail2ban
+            auto_block = bool(ctx.config.get("security.fail2ban_auto_block", True))
+            target_jail = str(ctx.config.get("security.fail2ban_block_jail", "auto"))
+
             sample = suspicious[0]
+            action_notes = []
+
+            # Automatically ban offending IPs in Fail2Ban if active defense is enabled
+            if auto_block:
+                unique_ips = {s.get("ip") for s in suspicious if s.get("ip")}
+                for s_ip in unique_ips:
+                    ok, detail = fail2ban.ban_ip(ctx, s_ip, jail=target_jail)
+                    if ok:
+                        action_notes.append(f"Auto-banned {s_ip} in Fail2Ban")
+
             out.check(
                 "openlitespeed.exploit_attempts",
                 CATEGORY,
@@ -200,13 +214,14 @@ def collect(ctx: Context) -> CollectorOutput:
                 f"Detected {len(suspicious)} suspicious exploit request(s) targeting PHP2Shell/webshells",
                 source=SOURCE,
             )
+            action_suffix = f" ({'; '.join(action_notes)})." if action_notes else ""
             out.finding(
                 "openlitespeed.exploit_attempts",
                 "security",
                 Severity.CRITICAL,
                 Confidence.CONFIRMED,
                 f"Suspicious exploit request detected in OpenLiteSpeed access log",
-                f"Detected {len(suspicious)} request(s) matching known PHP2Shell/webshell injection paths. Example: IP {sample.get('ip')} requested '{sample.get('path')}' (status: {sample.get('status')}).",
+                f"Detected {len(suspicious)} request(s) matching known PHP2Shell/webshell injection paths. Example: IP {sample.get('ip')} requested '{sample.get('path')}' (status: {sample.get('status')}).{action_suffix}",
                 "Review the requesting IP in firewall/Fail2Ban, quarantine any files created at that path, and ensure PHP execution in uploads is blocked.",
                 asset=sample.get("ip", "network"),
                 source=SOURCE,
