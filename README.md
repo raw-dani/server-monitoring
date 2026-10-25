@@ -1,6 +1,6 @@
 # Server Health & Security Monitoring (SHSM)
 
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![License: Proprietary](https://img.shields.io/badge/license-Proprietary-green.svg)]()
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checked: mypy](https://img.shields.io/badge/mypy-checked-blue.svg)](http://mypy-lang.org/)
@@ -144,7 +144,7 @@ d:/Server/server-monitoring/
 
 ### Prerequisites
 - Ubuntu 20.04 LTS or newer.
-- Python 3.9+ with `python3-venv`.
+- Python 3.8+ with `python3-venv`.
 - CyberPanel with OpenLiteSpeed installed.
 
 ### Automated Installation

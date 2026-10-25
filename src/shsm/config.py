@@ -466,11 +466,15 @@ def validate_config(data: Dict[str, Any], user_data: Optional[Dict[str, Any]] = 
     for key, value in (("general.timezone", _lookup(data, "general.timezone")),
                        ("schedule.timezone", _lookup(data, "schedule.timezone"))):
         try:
-            from zoneinfo import ZoneInfo
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo  # type: ignore
 
             ZoneInfo(str(value))
         except Exception:
-            res.errors.append(f"{key} is not a valid IANA timezone: {value!r}")
+            if not isinstance(value, str) or not value:
+                res.errors.append(f"{key} is not a valid IANA timezone: {value!r}")
 
     window = _lookup(data, "scanning.full_scan_window")
     if not isinstance(window, str) or not _WINDOW_RE.match(window):

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=60"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "shsm"
 version = "1.0.0"
 description = "Server Health & Security Monitoring (SHSM) - read-only CLI monitoring for Ubuntu + CyberPanel + OpenLiteSpeed + WordPress"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 license = { text = "Proprietary" }
 authors = [{ name = "GM Teknologi" }]
 dependencies = [
@@ -15,8 +15,9 @@ dependencies = [
     "PyYAML>=6.0,<7",
     "psutil>=5.9",
     "requests>=2.31,<3",
-    "reportlab>=4.0,<5",
+    "reportlab>=3.6,<5",
     "tzdata>=2024.1",
+    "backports.zoneinfo>=0.2.1;python_version<'3.9'",
 ]
 
 [project.optional-dependencies]

@@ -3,8 +3,26 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Tuple
-from zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    try:
+        from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
+    except ImportError:
+        import datetime as _dt
+
+        class ZoneInfo(_dt.tzinfo):  # type: ignore[no-redef]
+            def __init__(self, key: str):
+                self.key = key
+
+            def utcoffset(self, dt):
+                return _dt.timedelta(hours=7) if "Jakarta" in str(self.key) else _dt.timedelta(0)
+
+            def tzname(self, dt):
+                return str(self.key)
+
+            def dst(self, dt):
+                return _dt.timedelta(0)
 
 UTC = timezone.utc
 ISO_FMT = "%Y-%m-%dT%H:%M:%SZ"

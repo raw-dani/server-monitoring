@@ -7,7 +7,7 @@ This guide covers production deployment of **Server Health & Security Monitoring
 ## 1. System Requirements
 
 - **Operating System**: Ubuntu 20.04 LTS, 22.04 LTS, or 24.04 LTS.
-- **Python**: Python 3.9, 3.10, 3.11, or 3.12 (with `python3-venv`).
+- **Python**: Python 3.8, 3.9, 3.10, 3.11, or 3.12 (with `python3-venv`).
 - **Dependencies**: `git`, `systemd`, `sudo`, `sqlite3`.
 - **Target Applications**:
   - CyberPanel (`/etc/cyberpanel/mysqlPassword`)
@@ -35,22 +35,13 @@ SHSM is designed from the ground up to follow the Principle of Least Privilege:
 ## 3. Installation via Git (Automated)
 
 ### Step 1: Install System Prerequisites
-SHSM requires Python 3.9 or higher.
+SHSM natively supports Python 3.8+ (including stock Python 3.8 in Ubuntu 20.04 LTS, and Python 3.10+ in Ubuntu 22.04 / 24.04). No third-party PPAs are required.
 
-- **For Ubuntu 22.04 LTS or 24.04 LTS** (default repository provides Python 3.10+):
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y git python3 python3-venv python3-pip
-  ```
-
-- **For Ubuntu 20.04 LTS** (default repository provides Python 3.8; install Python 3.11 via deadsnakes PPA):
-  ```bash
-  sudo apt-get update
-  sudo apt-get install -y git software-properties-common
-  sudo add-apt-repository -y ppa:deadsnakes/ppa
-  sudo apt-get update
-  sudo apt-get install -y python3.11 python3.11-venv python3.11-dev
-  ```
+Install prerequisites directly via the standard Ubuntu repositories:
+```bash
+sudo apt-get update
+sudo apt-get install -y git python3 python3-venv python3-pip
+```
 
 ### Step 2: Clone the Git Repository
 Clone the official SHSM repository into `/opt/shsm-src`:
@@ -76,7 +67,7 @@ sudo bash scripts/install.sh
 ```
 
 ### What `install.sh` Does Automatically:
-1. **Preflight Checks**: Verifies Ubuntu version, Python 3.9+ availability, and firewall binaries.
+1. **Preflight Checks**: Verifies Ubuntu version, Python 3.8+ availability, and firewall binaries.
 2. **Account Hardening Handling**: Temporarily unlocks `/etc/passwd` / `/etc/shadow` attributes (`chattr -ia`) if immutable flags were present, creates user `shsm:shsm`, adds required groups (`adm`, `proc`, `systemd-journal`), and restores original attributes.
 3. **Directory Structure**:
    - `/opt/shsm`: Codebase and isolated Python virtual environment.

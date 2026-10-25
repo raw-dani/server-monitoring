@@ -79,7 +79,7 @@ def discover_unit_for_role(
             unit_names.append(u_name)
 
     for unit_name in unit_names:
-        base_name = unit_name.removesuffix(".service").lower()
+        base_name = (unit_name[:-8] if unit_name.endswith(".service") else unit_name).lower()
         for pat in patterns:
             pat_lower = pat.lower()
             if pat_lower == base_name or pat_lower in base_name:
