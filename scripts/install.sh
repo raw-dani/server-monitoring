@@ -34,25 +34,38 @@ fi
 PYTHON_BIN=""
 for cmd in python3.12 python3.11 python3.10 python3.9 python3; do
     if command -v "$cmd" &>/dev/null; then
-        VER=$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-        MAJOR=$(echo "$VER" | cut -d. -f1)
-        MINOR=$(echo "$VER" | cut -d. -f2)
-        if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 9 ]; then
-            PYTHON_BIN="$cmd"
-            log_ok "Found compatible Python: $cmd ($VER)"
-            break
+        VER=$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)
+        if [ -n "$VER" ]; then
+            MAJOR=$(echo "$VER" | cut -d. -f1)
+            MINOR=$(echo "$VER" | cut -d. -f2)
+            if [ "$MAJOR" -eq 3 ] && [ "$MINOR" -ge 9 ]; then
+                PYTHON_BIN="$cmd"
+                log_ok "Found compatible Python: $cmd ($VER)"
+                break
+            fi
         fi
     fi
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-    log_err "Python 3.9 or higher is required. Please install python3.9+ and python3-venv."
+    CURRENT_PY=$(python3 -V 2>/dev/null || echo "not found")
+    log_err "Python 3.9 or higher is required. Detected system default: $CURRENT_PY"
+    if grep -qi "ubuntu" /etc/os-release 2>/dev/null; then
+        echo ""
+        log_info "Ubuntu 20.04 LTS defaults to Python 3.8. Install Python 3.11 via official deadsnakes PPA:"
+        echo -e "${YELLOW}  sudo apt-get update"
+        echo -e "  sudo apt-get install -y software-properties-common"
+        echo -e "  sudo add-apt-repository -y ppa:deadsnakes/ppa"
+        echo -e "  sudo apt-get update"
+        echo -e "  sudo apt-get install -y python3.11 python3.11-venv python3.11-dev${NC}"
+        echo ""
+    fi
     exit 1
 fi
 
 # Ensure python3-venv is available
 if ! $PYTHON_BIN -m venv --help &>/dev/null; then
-    log_err "Python venv module is missing. Run: apt-get install -y python3-venv"
+    log_err "Python venv module is missing for $PYTHON_BIN. Run: apt-get install -y ${PYTHON_BIN}-venv"
     exit 1
 fi
 
