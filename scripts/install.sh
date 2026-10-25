@@ -49,6 +49,24 @@ done
 
 if [ -z "$PYTHON_BIN" ]; then
     CURRENT_PY=$(python3 -V 2>/dev/null || echo "not found")
+    if grep -qi "ubuntu" /etc/os-release 2>/dev/null && command -v apt-get &>/dev/null; then
+        log_info "Python 3.9+ was not found (detected: $CURRENT_PY). Attempting automated install of Python 3.11 via deadsnakes PPA..."
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq || true
+        apt-get install -y software-properties-common || true
+        add-apt-repository -y ppa:deadsnakes/ppa || true
+        apt-get update -qq || true
+        apt-get install -y python3.11 python3.11-venv python3.11-dev || true
+
+        if command -v python3.11 &>/dev/null; then
+            PYTHON_BIN="python3.11"
+            log_ok "Successfully installed and verified: python3.11"
+        fi
+    fi
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+    CURRENT_PY=$(python3 -V 2>/dev/null || echo "not found")
     log_err "Python 3.9 or higher is required. Detected system default: $CURRENT_PY"
     if grep -qi "ubuntu" /etc/os-release 2>/dev/null; then
         echo ""
@@ -65,8 +83,12 @@ fi
 
 # Ensure python3-venv is available
 if ! $PYTHON_BIN -m venv --help &>/dev/null; then
-    log_err "Python venv module is missing for $PYTHON_BIN. Run: apt-get install -y ${PYTHON_BIN}-venv"
-    exit 1
+    log_warn "Python venv module missing for $PYTHON_BIN. Attempting to install ${PYTHON_BIN}-venv..."
+    apt-get install -y "${PYTHON_BIN}-venv" 2>/dev/null || true
+    if ! $PYTHON_BIN -m venv --help &>/dev/null; then
+        log_err "Python venv module is missing for $PYTHON_BIN. Run: apt-get install -y ${PYTHON_BIN}-venv"
+        exit 1
+    fi
 fi
 
 # Optional security tools check
