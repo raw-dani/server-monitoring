@@ -121,7 +121,7 @@ if [ -n "$PASSWD_ORIG_ATTRS" ] && command -v chattr &>/dev/null; then
     done
 fi
 
-# Add shsm to groups to allow reading system logs and process stats if hidepid is enabled
+# Add shsm to groups to allow reading system logs, process stats, and website public_html
 usermod -aG adm "$SHSM_USER" || true
 if getent group proc &>/dev/null; then
     usermod -aG proc "$SHSM_USER" || true
@@ -129,6 +129,13 @@ fi
 if getent group systemd-journal &>/dev/null; then
     usermod -aG systemd-journal "$SHSM_USER" || true
 fi
+if getent group nobody &>/dev/null; then
+    usermod -aG nobody "$SHSM_USER" || true
+fi
+if getent group nogroup &>/dev/null; then
+    usermod -aG nogroup "$SHSM_USER" || true
+fi
+
 
 # 3. Create Directory Structure
 INSTALL_DIR="/opt/shsm"

@@ -177,10 +177,13 @@ def run_command(
         if uid == 0:
             return CommandResult(argv, error=INVALID, message="refusing to run as root user")
         if os.geteuid() != 0 and os.geteuid() != uid:
-            return CommandResult(
-                argv, error=PERMISSION, message=f"cannot switch to user {user!r}: SHSM is not running as root"
-            )
-        if os.geteuid() == 0:
+            sudo_bin = find_executable("sudo")
+            if not sudo_bin:
+                return CommandResult(
+                    argv, error=PERMISSION, message=f"cannot switch to user {user!r}: sudo binary not found"
+                )
+            argv = [sudo_bin, "-n", "-u", user] + argv
+        elif os.geteuid() == 0:
             kwargs.update(user=uid, group=gid, extra_groups=groups)
         env = dict(env or {})
         env.setdefault("HOME", home)

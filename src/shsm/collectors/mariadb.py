@@ -65,6 +65,9 @@ def _run_query(ctx: Context, query: str) -> Tuple[bool, str, str]:
     return res.ok, res.stdout, res.stderr
 
 
+run_query = _run_query
+
+
 def parse_name_value_tsv(stdout: str) -> Dict[str, str]:
     res: Dict[str, str] = {}
     for line in stdout.splitlines():

@@ -192,43 +192,68 @@ sudo -u shsm shsm doctor
      RewriteRule ^.*\.env.*$ - [F,L]
      RewriteRule ^(example\.env|.*\.git|.*\.sql)$ - [F,L]
      ```
-  3. **Blokir Manual IP Penyerang via Firewalld**:
-     Jika menemukan IP agresif di log akses, buang seluruh trafik dari IP tersebut menggunakan zona `drop`:
-     ```bash
-     firewall-cmd --zone=drop --add-source=<IP_PENYERANG> --permanent
-     firewall-cmd --reload
-     ```
-     Untuk melihat daftar IP yang diblokir:
-     ```bash
-     firewall-cmd --zone=drop --list-sources
-     ```
-     Untuk membuka blokir IP jika diperlukan:
-     ```bash
-     firewall-cmd --zone=drop --remove-source=<IP_PENYERANG> --permanent
-     firewall-cmd --reload
-     ```
-  4. **Setup Auto-Ban Otomatis Menggunakan Fail2Ban + Firewalld**:
-     Agar IP yang memindai file `.env` atau URL exploit otomatis diblokir oleh Firewalld:
+  3. **Blokir Manual IP Penyerang via Firewall (UFW / Firewalld)**:
+     Jika menemukan IP agresif di log akses, buang seluruh trafik dari IP tersebut:
+     - **Jika menggunakan UFW (Ubuntu Default)**:
+       ```bash
+       # Blokir IP langsung di urutan teratas firewall:
+       sudo ufw insert 1 deny from <IP_PENYERANG> to any
+
+       # Melihat daftar aturan UFW bernomor:
+       sudo ufw status numbered
+
+       # Membuka blokir IP jika diperlukan:
+       sudo ufw delete deny from <IP_PENYERANG>
+       ```
+     - **Jika menggunakan Firewalld**:
+       ```bash
+       firewall-cmd --zone=drop --add-source=<IP_PENYERANG> --permanent
+       firewall-cmd --reload
+
+       # Melihat daftar IP yang diblokir:
+       firewall-cmd --zone=drop --list-sources
+
+       # Membuka blokir IP jika diperlukan:
+       firewall-cmd --zone=drop --remove-source=<IP_PENYERANG> --permanent
+       firewall-cmd --reload
+       ```
+  4. **Setup Auto-Ban Otomatis Menggunakan Fail2Ban (UFW / Firewalld)**:
+     Agar IP yang memindai file `.env`, URL exploit, atau flooding `xmlrpc.php` otomatis diblokir oleh firewall:
      - **Buat filter Fail2Ban** di `/etc/fail2ban/filter.d/ols-scanner.conf`:
        ```ini
        [Definition]
        failregex = ^<HOST> - - \[.*\] "(GET|POST|HEAD) .*(?:\.env|\.git|\.aws|\.sql|\.bak|wp-config\.php|phpmyadmin|eval-stdin\.php).* HTTP/.*" (?:404|403) .*$
                    ^<HOST> - - \[.*\] "(GET|POST|HEAD) .*\.env.* HTTP/.*" (?:404|403) .*$
+                   ^<HOST> - - \[.*\] "(GET|POST) .*(?:xmlrpc\.php).* HTTP/.*" .*$
        ignoreregex =
        ```
-     - **Aktifkan jail Fail2Ban dengan Firewalld** di `/etc/fail2ban/jail.d/ols-scanner.local`:
-       ```ini
-       [ols-scanner]
-       enabled   = true
-       port      = http,https
-       filter    = ols-scanner
-       logpath   = /usr/local/lsws/logs/access.log
-       maxretry  = 3
-       findtime  = 600
-       bantime   = 86400
-       banaction = firewallcmd-rich-rules
-       action    = %(action_)s
-       ```
+     - **Aktifkan jail Fail2Ban** di `/etc/fail2ban/jail.d/ols-scanner.local`:
+       - **Pilihan A: Menggunakan UFW (`banaction = ufw`) [Direkomendasikan untuk Ubuntu/CyberPanel]**:
+         ```ini
+         [ols-scanner]
+         enabled   = true
+         port      = http,https
+         filter    = ols-scanner
+         logpath   = /usr/local/lsws/logs/access.log
+         maxretry  = 3
+         findtime  = 600
+         bantime   = 86400
+         banaction = ufw
+         action    = %(action_)s
+         ```
+       - **Pilihan B: Menggunakan Firewalld (`banaction = firewallcmd-rich-rules`)**:
+         ```ini
+         [ols-scanner]
+         enabled   = true
+         port      = http,https
+         filter    = ols-scanner
+         logpath   = /usr/local/lsws/logs/access.log
+         maxretry  = 3
+         findtime  = 600
+         bantime   = 86400
+         banaction = firewallcmd-rich-rules
+         action    = %(action_)s
+         ```
      - **Reload Fail2Ban**:
        ```bash
        fail2ban-client reload
@@ -236,6 +261,8 @@ sudo -u shsm shsm doctor
      - **Pantau status IP yang terkena auto-ban**:
        ```bash
        fail2ban-client status ols-scanner
+       # Jika menggunakan UFW, aturan blokir otomatis terlihat di status UFW:
+       sudo ufw status numbered
        ```
      - **Membuka blokir IP tertentu dari jail**:
        ```bash
