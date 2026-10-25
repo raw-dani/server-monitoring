@@ -283,6 +283,51 @@ sudo -u shsm shsm doctor
 
 ---
 
+### I. Website atau WordPress Tidak Ditemukan (`Discovered 0 active website(s)` / `0 WordPress site(s)`)
+- **Gejala**:
+  - `sudo -u shsm shsm websites discover` menghasilkan `Discovered 0 active website(s) (0 newly added, 0 removed)`.
+  - `sudo -u shsm shsm wordpress discover` menghasilkan `Discovered 0 WordPress site(s)`.
+  - Pada tampilan `shsm status`, baris `Websites Monitored: 0`.
+
+- **Penyebab**:
+  1. **CyberPanel Menyimpan Data Website di MariaDB (Bukan SQLite)**:
+     CyberPanel menyimpan konfigurasi domain di database MariaDB `cyberpanel` pada tabel `websiteFunctions_websites` (`domain`, `adminEmail`, `externalApp`, `path`). File SQLite `/etc/cyberpanel/cyberpanel.db` tidak ada pada instalasi standar CyberPanel.
+  2. **Izin Direktori `/home/<domain>` Terbatas (Group `nobody`)**:
+     Di CyberPanel, direktori website (misalnya `/home/domain.com/public_html`) memiliki kepemilikan `user:nobody` dengan izin `0750` (`rwxr-x---`). Jika user sistem `shsm` belum dimasukkan ke group `nobody` atau `nogroup`, pembacaan folder ditolak (`PermissionError: [Errno 13] Permission denied`).
+  3. **Loop Scanner `/home` Terhenti oleh Exception Folder Terisolasi**:
+     Jika di dalam `/home` terdapat folder khusus milik root/sistem dengan izin terbatas (seperti `/home/cyberpanel` atau `/home/docker` mode `0700`), iterasi scanner versi lama langsung terhenti saat menemui exception, sehingga membatalkan pemindaian sisa website lainnya.
+  4. **Ketergantungan WordPress Discovery terhadap Inventory Website**:
+     Perintah `shsm wordpress discover` mencari instalasi WordPress di dalam daftar website aktif yang tersimpan di inventory SHSM. Jika `websites discover` belum berhasil menemukan website, maka `wordpress discover` tidak memiliki direktori untuk dipindai.
+
+- **Solusi & Langkah Penanganan**:
+  1. **Tambahkan User `shsm` ke Group `nobody` & `nogroup`**:
+     ```bash
+     sudo usermod -aG nobody,nogroup shsm
+     ```
+  2. **Perbarui Codebase & Jalankan Upgrade Script**:
+     Pembaruan ini menyertakan fitur query otomatis ke database MariaDB `cyberpanel`, pembacaan virtualhost dari `/usr/local/lsws/conf/httpd_config.conf`, serta penanganan exception yang aman per direktori:
+     ```bash
+     cd /opt/shsm-src
+     git pull
+     sudo bash scripts/upgrade.sh
+     ```
+  3. **Jalankan Ulang Discovery Website**:
+     ```bash
+     sudo -u shsm shsm websites discover
+     ```
+     *Output akan menampilkan seluruh domain aktif yang ditemukan berserta direktori root-nya.*
+  4. **Jalankan Ulang Discovery WordPress**:
+     ```bash
+     sudo -u shsm shsm wordpress discover
+     ```
+     *Output akan menampilkan versi WordPress dan pemilik Linux untuk setiap website.*
+  5. **Verifikasi Status Monitoring**:
+     ```bash
+     sudo -u shsm shsm status
+     ```
+
+---
+
 ## 3. Pemeriksaan Log SHSM
 
 Jika terjadi kejanggalan, pantau log utama SHSM:
