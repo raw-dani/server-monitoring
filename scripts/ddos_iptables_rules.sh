@@ -33,7 +33,7 @@ net.ipv4.icmp_echo_ignore_broadcasts = 1
 net.ipv4.icmp_ignore_bogus_error_responses = 1
 EOF
 
-sysctl --system > /dev/null || sysctl -p /etc/sysctl.d/99-shsm-ddos.conf
+sysctl -p /etc/sysctl.d/99-shsm-ddos.conf > /dev/null 2>&1 || true
 
 echo "==> [2/3] Configuring iptables Layer-4 Rate-Limiting rules..."
 

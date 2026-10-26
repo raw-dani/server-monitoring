@@ -44,10 +44,14 @@ def parse_ols_tuning_and_ddos(config_path: str) -> Dict[str, Any]:
 
     settings["found"] = True
 
-    # Look for perClientConnLimit
+    # Look for perClientConnLimit or hardLimit/softLimit (OLS tuning syntax variants)
     m_limit = re.search(r"perClientConnLimit\s+(\d+)", content)
     if m_limit:
         settings["per_client_conn_limit"] = int(m_limit.group(1))
+    else:
+        m_hard = re.search(r"hardLimit\s+(\d+)", content)
+        if m_hard:
+            settings["per_client_conn_limit"] = int(m_hard.group(1))
 
     # Look for gracePeriod and banPeriod
     m_grace = re.search(r"gracePeriod\s+(\d+)", content)
