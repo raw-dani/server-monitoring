@@ -362,7 +362,23 @@ sudo -u shsm shsm doctor
      > ```
      > Dan pastikan IP tersebut didaftarkan pada `ip_whitelist` di `/etc/shsm/config.yaml`.
 
-  3. **Matikan `xmlrpc.php` di Seluruh Domain**:
+  3. **Cara Cek IP 404 Terbanyak yang BELUM Diblokir (Unblocked Attackers)**:
+     Untuk menyaring log OpenLiteSpeed secara otomatis dan hanya menampilkan IP pembuat error 404 yang saat ini **belum ada** di daftar blokir `iptables`:
+     ```bash
+     # Ambil IP yang sudah diblokir saat ini
+     BLOCKED_IPS=$(sudo iptables -L INPUT -n | grep DROP | awk '{print $4}' | grep -v "0.0.0.0/0" | tr '\n' '|')
+
+     # Filter 10 IP teratas penghasil 404 yang BELUM diblokir
+     awk '$9 == "404" {print $1}' /usr/local/lsws/logs/access.log | \
+     grep -Ev "(${BLOCKED_IPS:-none}|127.0.0.1|^::1)" | \
+     sort | uniq -c | sort -nr | head -n 10
+     ```
+     *Jika ingin memblokir IP baru tersebut secara manual sekaligus:*
+     ```bash
+     sudo iptables -I INPUT -s <IP_YANG_MUNCUL> -j DROP
+     ```
+
+  4. **Matikan `xmlrpc.php` di Seluruh Domain**:
      Tambahkan proteksi deny all untuk XML-RPC pada file `.htaccess`:
      ```bash
      for f in /home/*/public_html/.htaccess; do
