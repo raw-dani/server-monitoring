@@ -250,13 +250,17 @@ security:
   # Firewall backend options: auto | csf | firewalld | ufw | iptables | nftables | custom | none
   firewall_backend: "auto"
 
-  # Optional custom command (only if firewall_backend: "custom")
-  # firewall_custom_cmd: ["/usr/sbin/iptables", "-L", "-n"]
+  # Anti-abuse & Botnet Scanner Auto-Blocking
+  fail2ban_auto_block: true
+  fail2ban_block_jail: "auto"       # 'auto' or specific jail name like 'ols-scanner'
+  scanner_404_auto_block: true      # Automatically ban/drop IPs generating excessive 404 floods
+  scanner_404_threshold: 50         # Max 404 errors per run from single IP before auto-drop
 
-  # Whitelist of trusted IPs exempt from flood and scanner alerts
+  # Whitelist of trusted IPs exempt from flood and scanner alerts (IMPORTANT: add your server public IP here!)
   ip_whitelist:
     - "127.0.0.1"
     - "::1"
+    # - "206.183.128.56"             # Masukkan IP publik server Anda di sini agar tidak terblokir
 
   # Optional static public IP (if omitted, SHSM discovers it via external resolver)
   server_public_ip: ""
@@ -310,3 +314,79 @@ SHSM supports two secure methods for supplying secrets:
    - `SHSM_REDIS_PASSWORD`
    - `SHSM_EXTERNAL_TOKEN`
    - `SHSM_VULN_API_KEY`
+
+---
+
+## 4. Panduan Menerapkan Update ke Server Lain (Existing Server Upgrade)
+
+Jika Anda memiliki server VPS lain yang sudah terinstal SHSM versi sebelumnya, ikuti langkah berikut untuk menerapkan seluruh fitur terbaru (**Anti-Spam Mail Queue, RBL Reputation, Anti-DDoS Sockets, dan Auto-Ban 404 Scanner**) tanpa merusak database dan histori monitoring:
+
+### Langkah 1: Tarik Kode Terbaru & Jalankan Upgrade Script
+Login via SSH ke server yang ingin di-upgrade:
+```bash
+cd /opt/shsm-src
+
+# Tarik commit terbaru dari repositori Git Anda
+git pull
+
+# Jalankan script upgrade otomatis
+# (Membuat backup DB otomatis, update virtualenv, sync unit systemd, dan reload daemon)
+sudo bash scripts/upgrade.sh
+```
+
+### Langkah 2: Perbarui Izin Sudoers (Wajib untuk Fitur Auto-Drop iptables)
+Pastikan user `shsm` memiliki izin untuk mengeksekusi perintah mitigasi iptables:
+```bash
+sudo cp scripts/shsm.sudoers /etc/sudoers.d/shsm
+sudo chmod 0440 /etc/sudoers.d/shsm
+sudo visudo -c
+```
+
+### Langkah 3: Perbarui File `/etc/shsm/config.yaml`
+Tambahkan konfigurasi baru di `/etc/shsm/config.yaml` menggunakan editor teks (`sudo nano /etc/shsm/config.yaml`):
+
+```yaml
+thresholds:
+  ...
+  # [BARU] Ambang batas antrean mail & DDoS
+  mail_queue_warning: 100
+  mail_queue_critical: 500
+  ddos_ip_conns_warning: 50
+  ddos_ip_conns_critical: 150
+  ddos_syn_warning: 100
+  ddos_syn_critical: 300
+
+security:
+  ...
+  # [BARU] Proteksi botnet scanner 404
+  scanner_404_auto_block: true
+  scanner_404_threshold: 50
+
+  # [PENTING] Masukkan IP publik server tersebut agar tidak terkena blokir internal
+  ip_whitelist:
+    - "127.0.0.1"
+    - "::1"
+    - "<IP_PUBLIK_SERVER_ANDA>"
+```
+
+### Langkah 4: Aktifkan Timer Systemd Baru
+Aktifkan 3 systemd timer yang baru ditambahkan:
+```bash
+sudo systemctl enable --now shsm-ddos.timer
+sudo systemctl enable --now shsm-mail.timer
+sudo systemctl enable --now shsm-security-rbl.timer
+```
+
+### Langkah 5: Terapkan Script Pengerasan Kernel DDoS (Layer-1 Drop)
+Jalankan script pembantu untuk mengaktifkan TCP SYN cookies dan rate limiting:
+```bash
+sudo bash scripts/ddos_iptables_rules.sh
+```
+
+### Langkah 6: Verifikasi Hasil Upgrade
+Pastikan seluruh subsistem berjalan dengan status hijau (*PASS*):
+```bash
+sudo -u shsm shsm doctor
+sudo -u shsm shsm status
+```
+
