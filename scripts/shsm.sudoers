@@ -14,11 +14,14 @@ shsm ALL=(ALL) NOPASSWD: /usr/bin/rkhunter --check *
 shsm ALL=(ALL) NOPASSWD: /usr/bin/chkrootkit *
 shsm ALL=(ALL) NOPASSWD: /usr/bin/clamscan *, /usr/bin/clamdscan *
 
-# 4. Firewall inspection (strictly read-only)
+# 4. Firewall inspection & auto-drop (strictly limited to banning abusive IPs)
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/ufw status *, /usr/bin/ufw status *
-shsm ALL=(ALL) NOPASSWD: /usr/sbin/csf -l, /usr/bin/csf -l
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/csf -l, /usr/bin/csf -l, /usr/sbin/csf -d *, /usr/sbin/csf -dr *
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/nft list ruleset, /usr/bin/nft list ruleset
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/iptables -L *, /sbin/iptables -L *, /usr/bin/iptables -L *
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/iptables -C *, /sbin/iptables -C *, /usr/bin/iptables -C *
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/iptables -I INPUT -s * -j DROP, /sbin/iptables -I INPUT -s * -j DROP, /usr/bin/iptables -I INPUT -s * -j DROP
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/iptables -D INPUT -s * -j DROP, /sbin/iptables -D INPUT -s * -j DROP, /usr/bin/iptables -D INPUT -s * -j DROP
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables -L *, /sbin/ip6tables -L *, /usr/bin/ip6tables -L *
 shsm ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd --state, /usr/bin/firewall-cmd --list-all *
 
