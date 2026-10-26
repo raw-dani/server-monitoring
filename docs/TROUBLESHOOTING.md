@@ -328,6 +328,68 @@ sudo -u shsm shsm doctor
 
 ---
 
+### J. Lonjakan CPU 100% Akibat Request Masif ke `index.php` dan `xmlrpc.php` (Botnet 404/L7 Flood)
+
+- **Gejala**:
+  - Di `htop`, seluruh core CPU mencapai 100% dengan `Load average` melonjak drastis (di atas 20-30).
+  - Terdapat puluhan proses `lsphp: .../public_html/index.php` dan `.../xmlrpc.php` berjalan bersamaan di banyak domain.
+  - Proses `mysqld` memakan CPU tinggi (40–80%) karena setiap request WordPress memicu kueri database.
+  - Di log OpenLiteSpeed (`tail -f /usr/local/lsws/logs/access.log`), terlihat ribuan request `POST` beruntun ke URL non-existent seperti `/app`, `/api/route`, `/login`, `/dashboard`, `/admin` dengan status HTTP `404` dan menggunakan User-Agent bot palsu (`Baiduspider`, `DeepSeekBot`, `Googlebot`, `ChatGPT-User`, dll).
+
+- **Akar Masalah**:
+  1. **WordPress 404 Handling Menguras CPU**:
+     Di WordPress, setiap request ke URL yang tidak ada (404) diarahkan oleh OpenLiteSpeed ke `index.php`. WordPress harus memuat core, plugin, dan mengeksekusi kueri database MySQL hanya untuk merender halaman 404. Ribuan request per detik langsung melumpuhkan CPU.
+  2. **Botnet Cloud Provider (IP Spoofing / Scraping)**:
+     Penyerang menggunakan jaringan IP cloud (seperti Google Cloud `34.x.x.x` dan `35.x.x.x`) untuk menembakkan request POST liar secara masif.
+  3. **Eksploitasi `xmlrpc.php`**:
+     Bot mencoba melakukan XML-RPC pingback amplification atau brute-force credentials.
+
+- **Solusi & Langkah Penanganan**:
+  1. **Jalankan Auto-Blocker SHSM**:
+     SHSM secara otomatis mendeteksi IP yang menghasilkan > 50 request 404 dalam satu siklus dan mengeksekusi `iptables -I INPUT -s <IP> -j DROP`:
+     ```bash
+     sudo -u shsm shsm collect openlitespeed
+     ```
+  2. **Verifikasi Daftar Blokir iptables**:
+     Periksa apakah IP penyerang sudah masuk target `DROP`:
+     ```bash
+     sudo iptables -L INPUT -n -v | grep DROP
+     ```
+     > [!IMPORTANT]
+     > Jika IP publik server Anda sendiri ikut terblokir (karena request internal), segera unblock:
+     > ```bash
+     > sudo iptables -D INPUT -s <IP_PUBLIK_SERVER> -j DROP
+     > ```
+     > Dan pastikan IP tersebut didaftarkan pada `ip_whitelist` di `/etc/shsm/config.yaml`.
+
+  3. **Matikan `xmlrpc.php` di Seluruh Domain**:
+     Tambahkan proteksi deny all untuk XML-RPC pada file `.htaccess`:
+     ```bash
+     for f in /home/*/public_html/.htaccess; do
+         if [ -f "$f" ] && ! grep -q "xmlrpc.php" "$f"; then
+             echo -e "\n<Files xmlrpc.php>\nOrder Deny,Allow\nDeny from all\n</Files>" >> "$f"
+             echo "Protected $f"
+         fi
+     done
+     ```
+
+  4. **Tolak Request POST Liar Sebelum Menyentuh PHP**:
+     Tambahkan rule RewriteCond di `.htaccess` untuk me-reject (HTTP 403 Forbidden) request POST ke endpoint non-existent tanpa meneruskannya ke `index.php`:
+     ```apache
+     RewriteEngine On
+     RewriteCond %{REQUEST_METHOD} POST
+     RewriteCond %{REQUEST_URI} ^/(app|api|actions|login|admin|dashboard|settings) [NC]
+     RewriteRule .* - [F,L]
+     ```
+
+  5. **Bunuh Proses PHP yang Menggantung & Restart Web Server**:
+     ```bash
+     killall -9 lsphp
+     /usr/local/lsws/bin/lswsctrl restart
+     ```
+
+---
+
 ## 3. Pemeriksaan Log SHSM
 
 Jika terjadi kejanggalan, pantau log utama SHSM:
@@ -338,4 +400,7 @@ tail -f /var/log/shsm/shsm.log
 # Log journal unit systemd SHSM
 journalctl -u shsm-health.service -n 50 --no-pager
 journalctl -u shsm-audit-host.service -n 50 --no-pager
+journalctl -u shsm-openlitespeed.service -n 50 --no-pager
+journalctl -u shsm-ddos.service -n 50 --no-pager
 ```
+
