@@ -60,6 +60,7 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
     c_5xx = 0
     c_4xx = 0
     suspicious_requests: List[Dict[str, str]] = []
+    ip_404_counts: Dict[str, int] = {}
 
     for line in lines:
         m = _ACCESS_LOG_LINE.search(line)
@@ -75,6 +76,8 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
             elif first_c == "4":
                 status_counts["4xx"] += 1
                 c_4xx += 1
+                if code == "404" and ip:
+                    ip_404_counts[ip] = ip_404_counts.get(ip, 0) + 1
             elif first_c == "5":
                 status_counts["5xx"] += 1
                 c_5xx += 1
@@ -91,6 +94,7 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
         "4xx": c_4xx,
         "counts": status_counts,
         "suspicious": suspicious_requests,
+        "ip_404_counts": ip_404_counts,
     }
 
 
@@ -233,6 +237,68 @@ def collect(ctx: Context) -> CollectorOutput:
                 CATEGORY,
                 CheckStatus.PASS,
                 "No suspicious PHP/webshell exploit attempts in access log",
+                source=SOURCE,
+            )
+
+        # 404 Flood / Botnet Scanner Detection & Auto-Blocking
+        ip_404_counts = acc_info.get("ip_404_counts", {})
+        thresh_404 = int(ctx.config.get("security.scanner_404_threshold", 50))
+        auto_block_404 = bool(ctx.config.get("security.scanner_404_auto_block", True))
+        target_jail = str(ctx.config.get("security.fail2ban_block_jail", "auto"))
+        whitelist = set(ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
+
+        abusive_404_ips = {
+            ip: cnt for ip, cnt in ip_404_counts.items()
+            if cnt >= thresh_404 and ip not in whitelist and not ip.startswith("127.")
+        }
+
+        out.metric("openlitespeed.aggressive_404_scanners", len(abusive_404_ips))
+        if abusive_404_ips:
+            from shsm.security import fail2ban
+            ban_notes = []
+            if auto_block_404:
+                for a_ip, a_cnt in abusive_404_ips.items():
+                    # Attempt Fail2Ban ban, or fallback to direct iptables drop
+                    b_ok, b_msg = fail2ban.ban_ip(ctx, a_ip, jail=target_jail)
+                    if not b_ok and ctx.runner.which("iptables"):
+                        # Direct kernel drop fallback
+                        res_ipt = ctx.runner.run(["iptables", "-C", "INPUT", "-s", a_ip, "-j", "DROP"])
+                        if not res_ipt.ok:
+                            ctx.runner.run(["iptables", "-I", "INPUT", "-s", a_ip, "-j", "DROP"])
+                        ban_notes.append(f"Auto-dropped {a_ip} in iptables ({a_cnt} 404s)")
+                    elif b_ok:
+                        ban_notes.append(f"Auto-banned {a_ip} in Fail2Ban ({a_cnt} 404s)")
+
+            top_offender = max(abusive_404_ips.items(), key=lambda x: x[1])
+            ban_suffix = f" Actions taken: {'; '.join(ban_notes)}." if ban_notes else ""
+
+            out.finding(
+                "openlitespeed.scanner_404_flood",
+                "security",
+                Severity.CRITICAL,
+                Confidence.CONFIRMED,
+                f"Aggressive 404 flood/botnet scanner detected on OpenLiteSpeed ({len(abusive_404_ips)} IPs)",
+                f"Detected {len(abusive_404_ips)} IP(s) generating abnormal 404 bursts. "
+                f"Top violator: IP {top_offender[0]} generated {top_offender[1]} 404 requests.{ban_suffix}",
+                "The IP(s) have been auto-blocked. Ensure OpenLiteSpeed client throttling is active.",
+                asset=top_offender[0],
+                source=SOURCE,
+                key=f"ols:404_flood:{top_offender[0]}",
+            )
+            out.check(
+                "openlitespeed.scanner_404_flood",
+                CATEGORY,
+                CheckStatus.CRITICAL,
+                f"Detected {len(abusive_404_ips)} aggressive 404 scanner IP(s). Top: {top_offender[0]} ({top_offender[1]} 404s)",
+                asset=top_offender[0],
+                source=SOURCE,
+            )
+        else:
+            out.check(
+                "openlitespeed.scanner_404_flood",
+                CATEGORY,
+                CheckStatus.PASS,
+                "No aggressive 404 scanner/botnet activity detected in access log",
                 source=SOURCE,
             )
 
