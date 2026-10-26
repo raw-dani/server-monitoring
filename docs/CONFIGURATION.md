@@ -180,6 +180,12 @@ thresholds:
   ssl_warning_days: 30              # Days before certificate expiry
   ssl_high_days: 14
   ssl_critical_days: 7
+  mail_queue_warning: 100           # Postfix queue size warning threshold
+  mail_queue_critical: 500          # Postfix queue size critical threshold
+  ddos_ip_conns_warning: 50         # Concurrent web connections from single IP
+  ddos_ip_conns_critical: 150       # Concurrent web connections from single IP
+  ddos_syn_warning: 100             # Half-open SYN_RECV sockets warning
+  ddos_syn_critical: 300            # Half-open SYN_RECV sockets critical
 ```
 
 ### Services & Roles
@@ -246,6 +252,23 @@ security:
 
   # Optional custom command (only if firewall_backend: "custom")
   # firewall_custom_cmd: ["/usr/sbin/iptables", "-L", "-n"]
+
+  # Whitelist of trusted IPs exempt from flood and scanner alerts
+  ip_whitelist:
+    - "127.0.0.1"
+    - "::1"
+
+  # Optional static public IP (if omitted, SHSM discovers it via external resolver)
+  server_public_ip: ""
+
+  # Anti-spam DNSBL / RBL providers to query for server IP reputation
+  rbl_providers:
+    - "zen.spamhaus.org"
+    - "b.barracudacentral.org"
+    - "bl.spamcop.net"
+    - "dnsbl.sorbs.net"
+    - "psbl.surriel.com"
+    - "bl.mailspike.net"
 ```
 
 Supported Backends:
@@ -256,6 +279,7 @@ Supported Backends:
 - **`iptables`**: Direct netfilter packet inspection (`iptables -L -n`).
 - **`nftables`**: Modern Linux packet classification (`nft list ruleset`).
 - **`custom`**: Runs an arbitrary status check array defined in `firewall_custom_cmd`.
+
 ### Periodic Reports & Formats (HTML & PDF)
 SHSM secara berkala mengompilasi laporan eksekutif mingguan dan bulanan:
 ```yaml
