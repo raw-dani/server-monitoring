@@ -379,17 +379,33 @@ sudo -u shsm shsm doctor
      ```
 
   4. **Matikan `xmlrpc.php` di Seluruh Domain**:
-     Tambahkan proteksi deny all untuk XML-RPC pada file `.htaccess`:
+     Serangan XML-RPC Pingback/Brute-force memicu eksekusi database MySQL yang sangat berat (`mysqld` 90%+). Matikan total dengan dua lapis perlindungan:
+
+     **A. Blokir Global di OpenLiteSpeed (Paling Efisien - Zero PHP Execution)**:
+     Tambahkan aturan rewrite global di `/usr/local/lsws/conf/httpd_config.conf` agar server langsung membalas `403 Forbidden` di pintu gerbang:
+     ```text
+     rewrite  {
+       enable                  1
+       autoLoadHtaccess        1
+       rules                   <<<END_rules
+       RewriteCond %{REQUEST_URI} ^/.*xmlrpc\.php$ [NC]
+       RewriteRule .* - [F,L]
+       END_rules
+     }
+     ```
+
+     **B. Blokir Lapis Kedua via `.htaccess` Semua Website**:
+     Sisipkan rule blokir di baris pertama seluruh file `.htaccess`:
      ```bash
      for f in /home/*/public_html/.htaccess; do
-         if [ -f "$f" ] && ! grep -q "xmlrpc.php" "$f"; then
-             echo -e "\n<Files xmlrpc.php>\nOrder Deny,Allow\nDeny from all\n</Files>" >> "$f"
-             echo "Protected $f"
+         if [ -f "$f" ]; then
+             sed -i '1s/^/<Files xmlrpc.php>\nOrder Deny,Allow\nDeny from all\n<\/Files>\n\n/' "$f"
+             echo "Locked XML-RPC on $f"
          fi
      done
      ```
 
-  4. **Tolak Request POST Liar Sebelum Menyentuh PHP**:
+  5. **Tolak Request POST Liar Sebelum Menyentuh PHP**:
      Tambahkan rule RewriteCond di `.htaccess` untuk me-reject (HTTP 403 Forbidden) request POST ke endpoint non-existent tanpa meneruskannya ke `index.php`:
      ```apache
      RewriteEngine On
@@ -398,11 +414,13 @@ sudo -u shsm shsm doctor
      RewriteRule .* - [F,L]
      ```
 
-  5. **Bunuh Proses PHP yang Menggantung & Restart Web Server**:
+  6. **Bunuh Proses PHP yang Menggantung & Restart Web Server**:
+     Setelah proteksi XML-RPC dan POST terpasang, bersihkan seluruh proses PHP yang masih menggantung:
      ```bash
      killall -9 lsphp
      /usr/local/lsws/bin/lswsctrl restart
      ```
+     *Setelah restart, proses `xmlrpc.php` akan hilang total dari `htop`, beban `mysqld` akan anjlok kembali ke < 5%, dan load average server akan normal.*
 
 ---
 
