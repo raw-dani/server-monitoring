@@ -53,6 +53,18 @@ Menganalisis lonjakan error 5xx, PHP fatal error, dan pola akses:
 sudo -u shsm shsm collect openlitespeed
 ```
 
+### Koleksi Antrean Email & Deteksi Outbound Spam Bot
+Memantau antrean Postfix queue spools dan mendeteksi script non-MTA (PHP/shell) yang mencoba koneksi langsung ke port SMTP keluar (port 25, 465, 587):
+```bash
+sudo -u shsm shsm collect mail
+```
+
+### Koleksi Anomali Soket DDoS & Koneksi Konkuren Web
+Memeriksa TCP SYN flood (`SYN_RECV`) dan mendeteksi IP tunggal yang membuka koneksi simultan berlebih pada port 80/443:
+```bash
+sudo -u shsm shsm collect ddos
+```
+
 ---
 
 ## 3. Manajemen Website & WordPress
@@ -123,6 +135,18 @@ sudo -u shsm shsm ban <IP_ADDRESS> --jail ols-scanner
 
 # Buka blokir IP
 sudo -u shsm shsm unban <IP_ADDRESS>
+```
+
+### Audit Reputasi IP Server pada DNSBL / RBL (Anti-Spam Blacklist)
+Memeriksa status IP publik server terhadap database DNSBL ternama (Spamhaus, Barracuda, SpamCop, SORBS, PSBL, Mailspike) untuk deteksi dini pemblokiran IP akibat spam malware:
+```bash
+sudo -u shsm shsm security rbl
+```
+
+### Audit Konfigurasi Anti-DDoS & Bot Throttling OpenLiteSpeed
+Memeriksa apakah batas koneksi per klien (`perClientConnLimit`), masa ban (`banPeriod`), serta challenge anti-DDoS / reCAPTCHA telah aktif di OpenLiteSpeed:
+```bash
+sudo -u shsm shsm security ols-ddos
 ```
 
 ---
@@ -284,7 +308,7 @@ sudo -u shsm shsm retention run
 
 ## 10. Manajemen Service & Systemd Timers
 
-SHSM beroperasi tanpa daemon monolitik, melainkan melalui 21 timer independen:
+SHSM beroperasi tanpa daemon monolitik, melainkan melalui 24 systemd timer independen yang efisien:
 
 ### Memeriksa Jadwal & Status Semua Timer SHSM
 ```bash
@@ -298,6 +322,16 @@ sudo systemctl reset-failed 'shsm-*'
 
 ### Menjalankan Salah Satu Pekerjaan Terjadwal Secara Manual
 ```bash
+# Menjalankan pemantauan socket flood & DDoS
+sudo systemctl start shsm-ddos.service
+
+# Menjalankan audit antrean mail & koneksi outbound SMTP
+sudo systemctl start shsm-mail.service
+
+# Menjalankan audit reputasi RBL IP publik
+sudo systemctl start shsm-security-rbl.service
+
+# Menjalankan health & host security audit
 sudo systemctl start shsm-health.service
 sudo systemctl start shsm-audit-host.service
 ```
@@ -308,5 +342,8 @@ sudo systemctl start shsm-audit-host.service
 tail -f /var/log/shsm/shsm.log
 
 # Log journal unit tertentu
+journalctl -u shsm-ddos.service -n 50 --no-pager
+journalctl -u shsm-mail.service -n 50 --no-pager
 journalctl -u shsm-health.service -n 50 --no-pager
 ```
+

@@ -1,0 +1,19 @@
+[Unit]
+Description=SHSM DDoS socket flood and concurrent connection audit
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+User=shsm
+Group=shsm
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml collect ddos
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+CPUQuota=40%
+MemoryHigh=192M
+MemoryMax=256M

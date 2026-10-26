@@ -14,10 +14,10 @@
 - **Strictly Read-Only & Non-Destructive**: Zero automatic remediation. SHSM observes, analyzes, diagnoses, alerts, and reports without risking service restarts or unintended configuration changes.
 - **Principle of Least Privilege**: Dedicated `shsm` system account. WP-CLI commands are strictly invoked as each website's Linux owner (never as root).
 - **Comprehensive Subsystem Coverage**:
-  - **Health**: CPU & load, Memory & Swap (OOM detection), Disk & Inodes, Services & Flapping, Database (MariaDB & Redis), Web & SSL (HTTP latency & TLS certificate expiry).
-  - **Security**: SSH security & login baselining, Firewall & Fail2Ban, WordPress core checksums & admin discovery, Malware heuristics & ClamAV, Lynis & Rootkit scanners, File Integrity Monitoring (FIM).
+  - **Health**: CPU & load, Memory & Swap (OOM detection), Disk & Inodes, Services & Flapping, Database (MariaDB & Redis), Web & SSL (HTTP latency & TLS certificate expiry), Postfix Mail Queue & Outbound Mail.
+  - **Security**: SSH security & login baselining, Firewall & Fail2Ban, Anti-DDoS socket monitoring, WordPress core checksums & admin discovery, Malware heuristics & ClamAV, Lynis & Rootkit scanners, File Integrity Monitoring (FIM), DNSBL/RBL IP reputation, OLS bot throttling.
 - **Deterministic 0–100 Scoring**: Health and Security scores calculated using weighted subsystems with strict freshness and coverage tracking.
-- **Automated Scheduling**: 21 individual, isolated systemd timers (`Persistent=true`). Zero permanent background daemons.
+- **Automated Scheduling**: 24 individual, isolated systemd timers (`Persistent=true`). Zero permanent background daemons.
 - **Reporting & Notifications**:
   - HTML email alerts with secret redaction.
   - Comprehensive Weekly and Monthly PDF reports compiled natively using ReportLab.
