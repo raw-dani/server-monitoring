@@ -37,6 +37,8 @@ def build_jobs(schedule: Optional[Dict[str, Any]] = None) -> List[JobDef]:
                max_age_seconds=1800, timeout_seconds=180),
         JobDef("openlitespeed", ["collect", "openlitespeed"], "*-*-* *:2/5:00", "OpenLiteSpeed log parsing",
                root=True, max_age_seconds=1800, timeout_seconds=300),
+        JobDef("ddos", ["collect", "ddos"], "*-*-* *:0/2:00", "DDoS socket flood & concurrent connection audit",
+               max_age_seconds=600, timeout_seconds=60),
         JobDef("mail", ["collect", "mail"], "*-*-* *:4/10:00", "Postfix queue & unauthorized outbound SMTP checks",
                root=True, max_age_seconds=1800, timeout_seconds=120),
         JobDef("security-rbl", ["security", "rbl"], "*-*-* 00/6:25:00", "DNSBL / RBL spam blacklist status checks",

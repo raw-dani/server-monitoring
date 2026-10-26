@@ -134,6 +134,10 @@ DEFAULTS: Dict[str, Any] = {
         "zombie_warning": 20,
         "mail_queue_warning": 100,
         "mail_queue_critical": 500,
+        "ddos_ip_conns_warning": 50,
+        "ddos_ip_conns_critical": 150,
+        "ddos_syn_warning": 100,
+        "ddos_syn_critical": 300,
     },
     "services": {
         # role -> {units: [explicit unit names], patterns: [discovery patterns], required: bool}

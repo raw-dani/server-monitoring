@@ -112,3 +112,31 @@ iptables -A OUTPUT -p tcp --dport 25 -j REJECT --reject-with icmp-port-unreachab
 # This restricts outbound SMTP connections strictly to root, postfix, and mailman.
 ```
 
+---
+
+## 10. Anti-DDoS Early IP Blocking & Bot Challenge Hardening
+
+To stop DDoS floods before they reach backend PHP and database workers:
+
+### 1. SHSM Flood Detection
+- **`shsm collect ddos`**:
+  - Continuously samples kernel TCP sockets on ports 80/443 in < 25ms.
+  - Detects SYN_RECV floods (SYN attacks) and single IPs opening > 50-150 concurrent connections.
+- **`shsm security ols-ddos`**:
+  - Audits OpenLiteSpeed tuning to verify that `perClientConnLimit` and `banPeriod` are properly enforced.
+
+### 2. Kernel & Firewall Layer-1 Protection (`scripts/ddos_iptables_rules.sh`)
+Execute the bundled hardening script:
+```bash
+sudo bash scripts/ddos_iptables_rules.sh
+```
+This enables TCP SYN cookies (`net.ipv4.tcp_syncookies = 1`) and rejects IP addresses attempting more than 80 concurrent connections directly at the Linux kernel packet filter (zero web server overhead).
+
+### 3. OpenLiteSpeed Bot Challenge (Human vs Bot Verification)
+In CyberPanel / OpenLiteSpeed WebAdmin Console:
+1. Navigate to **Server Configuration -> Tuning -> Per Client Throttling**.
+2. Set **Static/Dynamic Requests/sec** (e.g., 50-100).
+3. Set **Banning Period (secs)** (e.g., 60-300).
+4. Under **reCaptcha / Bot Verification**, enable the Anti-DDoS challenge. Legitimate web browsers will execute JavaScript and pass seamlessly, while headless bot scripts (curl, python, flooders) are instantly dropped with HTTP 403.
+
+

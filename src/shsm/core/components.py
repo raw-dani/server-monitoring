@@ -47,6 +47,8 @@ PREFIX_COMPONENT: List[Tuple[str, Optional[str]]] = [
     ("fail2ban.", "firewall_network"),
     ("network.errors", None),
     ("network.", "firewall_network"),
+    ("ddos.", "firewall_network"),
+    ("security.ols_anti_ddos", "websites"),
     ("mail.outbound_smtp", "firewall_network"),
     ("mail.", "services"),
     ("security.rbl", "firewall_network"),
@@ -86,6 +88,8 @@ EXPECTED_CHECKS: Dict[str, List[str]] = {
 STALE_SECONDS: List[Tuple[str, int]] = [
     ("security.rbl", 43200),
     ("rbl.", 43200),
+    ("ddos.", 600),
+    ("security.ols_anti_ddos", 7200),
     ("mail.outbound_smtp", 1800),
     ("mail.", 1800),
     ("ssl.", 24 * 3600),

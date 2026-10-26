@@ -259,6 +259,20 @@ def cmd_collect_mail(click_ctx: click.Context) -> None:
                 fg="green" if code == 0 else "yellow")
 
 
+@grp_collect.command("ddos")
+@click.pass_context
+def cmd_collect_ddos(click_ctx: click.Context) -> None:
+    """Monitor concurrent web sockets and detect SYN/HTTP floods."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    engine = RunnerEngine(app_ctx)
+    from shsm.collectors import ddos
+
+    code, out = engine.run_job("ddos", lambda: ddos.collect(app_ctx))
+    click.secho(f"DDoS connection inspection finished: {len(out.findings)} finding(s).",
+                fg="green" if code == 0 else "yellow")
+
+
+
 
 # ---------------------------------------------------------------- websites
 @main.group("websites")
@@ -411,6 +425,20 @@ def cmd_security_rbl(click_ctx: click.Context) -> None:
     code, out = engine.run_job("security-rbl", lambda: rbl.scan(app_ctx))
     click.secho(f"RBL blacklist check completed: {len(out.findings)} finding(s).",
                 fg="green" if code == 0 else "yellow")
+
+
+@grp_security.command("ols-ddos")
+@click.pass_context
+def cmd_security_ols_ddos(click_ctx: click.Context) -> None:
+    """Audit OpenLiteSpeed anti-DDoS, client throttling, and bot challenge configuration."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    engine = RunnerEngine(app_ctx)
+    from shsm.security import ols_anti_ddos
+
+    code, out = engine.run_job("security-ols-ddos", lambda: ols_anti_ddos.scan(app_ctx))
+    click.secho(f"OLS Anti-DDoS audit completed: {len(out.findings)} finding(s).",
+                fg="green" if code == 0 else "yellow")
+
 
 
 
