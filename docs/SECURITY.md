@@ -80,3 +80,35 @@ When legitimate administrative changes are made to server configuration:
 ```bash
 sudo -u shsm shsm integrity baseline --update
 ```
+
+---
+
+## 9. Anti-Spam & IP Blacklist Protection Hardening
+
+Malware and webshells frequently attempt to turn VPS servers into outbound spam bots, which quickly gets the server public IP blacklisted across RBLs (Spamhaus, Barracuda, SpamCop).
+
+### SHSM Detection Capabilities
+1. **Mail Queue Audit (`shsm collect mail`)**:
+   - Inspects Postfix spool directories or `mailq`. Alerts on queue spikes (> 100 warning, > 500 critical).
+   - Automatically identifies top sender envelope addresses responsible for queue congestion.
+2. **Outbound SMTP Socket Monitoring**:
+   - Inspects TCP connections. Flags any non-MTA process (PHP-FPM, bash, perl, python, python3, unknown binaries) attempting direct connections to remote ports 25, 465, or 587.
+3. **DNSBL / RBL Reputation Scan (`shsm security rbl`)**:
+   - Periodically queries major anti-spam DNS blocklists (Spamhaus, Barracuda, SpamCop, SORBS, PSBL, Mailspike) to alert immediately if the IP gets blacklisted.
+
+### Recommended OS / Firewall Hardening
+To proactively prevent PHP scripts and malware from sending unauthorized outbound mail on port 25:
+
+#### Block Outbound Port 25 Except for User `postfix` / `mail`
+```bash
+# Using iptables:
+iptables -A OUTPUT -p tcp --dport 25 -m owner --uid-owner postfix -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 25 -m owner --uid-owner root -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 25 -d 127.0.0.1 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 25 -j REJECT --reject-with icmp-port-unreachable
+
+# If using CSF (CyberPanel default):
+# Ensure SMTP_BLOCK = "1" in /etc/csf/csf.conf
+# This restricts outbound SMTP connections strictly to root, postfix, and mailman.
+```
+

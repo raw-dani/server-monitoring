@@ -132,6 +132,8 @@ DEFAULTS: Dict[str, Any] = {
         "clamav_signature_critical_days": 7,
         "network_error_rate_warning_per_minute": 10,
         "zombie_warning": 20,
+        "mail_queue_warning": 100,
+        "mail_queue_critical": 500,
     },
     "services": {
         # role -> {units: [explicit unit names], patterns: [discovery patterns], required: bool}
@@ -275,6 +277,15 @@ DEFAULTS: Dict[str, Any] = {
         "fail2ban_auto_block": True,
         "fail2ban_block_jail": "auto",  # 'auto' or specific jail name like 'ols-scanner'
         "ip_whitelist": ["127.0.0.1", "::1"],
+        "server_public_ip": "",
+        "rbl_providers": [
+            "zen.spamhaus.org",
+            "b.barracudacentral.org",
+            "bl.spamcop.net",
+            "dnsbl.sorbs.net",
+            "psbl.surriel.com",
+            "bl.mailspike.net",
+        ],
     },
     "alerts": {
         "enabled": True,

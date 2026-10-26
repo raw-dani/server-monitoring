@@ -47,6 +47,10 @@ PREFIX_COMPONENT: List[Tuple[str, Optional[str]]] = [
     ("fail2ban.", "firewall_network"),
     ("network.errors", None),
     ("network.", "firewall_network"),
+    ("mail.outbound_smtp", "firewall_network"),
+    ("mail.", "services"),
+    ("security.rbl", "firewall_network"),
+    ("rbl.", "firewall_network"),
     ("malware.", "malware_integrity"),
     ("clamav.", "malware_integrity"),
     ("rootkit.", "malware_integrity"),
@@ -80,6 +84,10 @@ EXPECTED_CHECKS: Dict[str, List[str]] = {
 
 # seconds after which a check result is considered stale (=> unknown for coverage)
 STALE_SECONDS: List[Tuple[str, int]] = [
+    ("security.rbl", 43200),
+    ("rbl.", 43200),
+    ("mail.outbound_smtp", 1800),
+    ("mail.", 1800),
     ("ssl.", 24 * 3600),
     ("wordpress.", 3 * 86400),
     ("vulnerability.", 3 * 86400),

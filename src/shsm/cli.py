@@ -246,6 +246,20 @@ def cmd_collect_openlitespeed(click_ctx: click.Context) -> None:
     click.secho("OpenLiteSpeed log processing finished.", fg="green" if code == 0 else "yellow")
 
 
+@grp_collect.command("mail")
+@click.pass_context
+def cmd_collect_mail(click_ctx: click.Context) -> None:
+    """Monitor Postfix mail queue and detect unauthorized outbound SMTP connections."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    engine = RunnerEngine(app_ctx)
+    from shsm.collectors import mail_queue
+
+    code, out = engine.run_job("mail", lambda: mail_queue.collect(app_ctx))
+    click.secho(f"Mail queue collection finished: {len(out.metrics)} metric(s), {len(out.checks)} check(s).",
+                fg="green" if code == 0 else "yellow")
+
+
+
 # ---------------------------------------------------------------- websites
 @main.group("websites")
 def grp_websites() -> None:
@@ -384,6 +398,20 @@ def cmd_security_audit(click_ctx: click.Context, scope: str) -> None:
 
     code, out = engine.run_job(f"audit-{scope}", _do)
     click.secho(f"Security audit ({scope}) completed.", fg="green" if code == 0 else "yellow")
+
+
+@grp_security.command("rbl")
+@click.pass_context
+def cmd_security_rbl(click_ctx: click.Context) -> None:
+    """Check server public IP reputation across major DNSBL/RBL spam blocklists."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    engine = RunnerEngine(app_ctx)
+    from shsm.security import rbl
+
+    code, out = engine.run_job("security-rbl", lambda: rbl.scan(app_ctx))
+    click.secho(f"RBL blacklist check completed: {len(out.findings)} finding(s).",
+                fg="green" if code == 0 else "yellow")
+
 
 
 # ---------------------------------------------------------------- integrity
