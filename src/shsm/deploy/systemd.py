@@ -55,6 +55,11 @@ def generate_service_unit(job: JobDef, bin_path: str = "/opt/shsm/venv/bin/shsm"
 
 
 def generate_timer_unit(job: JobDef) -> str:
+    # Only infrequent jobs (daily/weekly/monthly) should be persistent across downtime.
+    # Frequent checks (health, services, openlitespeed, ddos, websites) must NOT catch up
+    # simultaneously on restart to prevent thundering herd spikes.
+    persistent_val = "true" if job.calendar.startswith("0") or "00/" in job.calendar else "false"
+
     lines = [
         "[Unit]",
         f"Description=SHSM timer for {job.description}",
@@ -62,10 +67,12 @@ def generate_timer_unit(job: JobDef) -> str:
         "",
         "[Timer]",
         f"OnCalendar={job.calendar}",
-        "Persistent=true",
+        f"Persistent={persistent_val}",
     ]
-    if job.random_delay > 0:
-        lines.append(f"RandomizedDelaySec={job.random_delay}")
+    # Add default randomized delay to spread execution load
+    delay = job.random_delay if job.random_delay > 0 else 30
+    lines.append(f"RandomizedDelaySec={delay}")
+
     lines.extend([
         f"Unit=shsm-{job.name}.service",
         "",

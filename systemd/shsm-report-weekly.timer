@@ -4,7 +4,8 @@ Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
 OnCalendar=Mon *-*-* 07:00:00 Asia/Jakarta
-Persistent=true
+Persistent=false
+RandomizedDelaySec=30
 Unit=shsm-report-weekly.service
 
 [Install]

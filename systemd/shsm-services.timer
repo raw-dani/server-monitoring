@@ -4,7 +4,8 @@ Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
 OnCalendar=*-*-* *:1/5:00
-Persistent=true
+Persistent=false
+RandomizedDelaySec=30
 Unit=shsm-services.service
 
 [Install]

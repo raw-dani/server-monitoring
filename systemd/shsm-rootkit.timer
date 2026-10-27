@@ -4,7 +4,8 @@ Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
 OnCalendar=Sat *-*-* 04:00:00
-Persistent=true
+Persistent=false
+RandomizedDelaySec=30
 Unit=shsm-rootkit.service
 
 [Install]

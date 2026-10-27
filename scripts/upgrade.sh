@@ -99,11 +99,12 @@ if [ -d "$SCRIPT_DIR/systemd" ]; then
     cp "$SCRIPT_DIR/systemd/"*.service /etc/systemd/system/ 2>/dev/null || true
     cp "$SCRIPT_DIR/systemd/"*.timer /etc/systemd/system/ 2>/dev/null || true
     systemctl daemon-reload
+    systemctl reset-failed 'shsm-*' 2>/dev/null || true
     for timer in /etc/systemd/system/shsm-*.timer; do
         timer_name=$(basename "$timer")
         systemctl start "$timer_name" 2>/dev/null || true
     done
-    log_ok "Systemd units updated and timers restarted with relaxed schedules."
+    log_ok "Systemd units updated and timers restarted with non-overlapping schedules."
 fi
 
 log_ok "SHSM has been successfully upgraded to the latest version!"

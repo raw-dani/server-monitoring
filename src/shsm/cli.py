@@ -788,11 +788,18 @@ def cmd_blocked(click_ctx: click.Context, ip: str, check: bool) -> None:
         click.secho("No blocked IPs or drop rules found.", fg="green")
         return
 
+    # Cap display to latest 50 entries if there are hundreds, to keep CLI responsive
+    display_limit = 50
+    display_items = items[:display_limit]
     click.echo(f"{'Source':<10} {'Target / IP / Subnet':<24} {'Jail/Chain':<14} {'Pkts':<8} {'Note'}")
     click.echo("-" * 75)
-    for item in items:
+    for item in display_items:
         col = "yellow" if item["source"] == "fail2ban" else "red"
         click.secho(f"{item['source']:<10} {item['target']:<24} {item['jail_or_chain']:<14} {item['packets']:<8} {item['note']}", fg=col)
+
+    if len(items) > display_limit:
+        click.echo("-" * 75)
+        click.secho(f"[INFO] Showing first {display_limit} of {len(items)} blocked targets. To check a specific IP, run: shsm blocked <IP>", fg="cyan")
 
 
 @main.command("ban")

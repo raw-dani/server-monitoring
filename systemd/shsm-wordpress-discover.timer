@@ -5,6 +5,7 @@ Documentation=https://github.com/gmteknologi/shsm
 [Timer]
 OnCalendar=*-*-* 00/6:10:00
 Persistent=true
+RandomizedDelaySec=30
 Unit=shsm-wordpress-discover.service
 
 [Install]
