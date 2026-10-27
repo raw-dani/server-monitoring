@@ -115,18 +115,22 @@ To update your production installation to the latest version released on GitHub 
 ```bash
 # 1. Pull the latest commits from GitHub
 cd /opt/shsm-src
-sudo git pull
+sudo git pull origin main
 
 # 2. Run the automated upgrade script
-# This creates an atomic DB backup, updates dependencies, runs new migrations, and refreshes systemd unit quotas
+# This creates an atomic DB backup in /var/lib/shsm/backups, syncs new files, updates dependencies,
+# enforces non-root shsm:shsm ownership, applies migrations, and refreshes systemd timers
 sudo bash scripts/upgrade.sh
 
-# 3. Ensure sudoers rules are up to date
-sudo cp scripts/shsm.sudoers /etc/sudoers.d/shsm
-sudo chmod 0440 /etc/sudoers.d/shsm
-sudo visudo -c
+# 3. Ensure CLI symlink is active
+sudo ln -sf /opt/shsm/venv/bin/shsm /usr/local/bin/shsm
 
-# 4. Verify status after upgrade
+# 4. Verify system health and timers after upgrade
 sudo -u shsm shsm doctor
 sudo -u shsm shsm status
+systemctl list-timers 'shsm-*'
 ```
+
+> **Note:**
+> - Your existing configuration in `/etc/shsm/config.yaml` and monitoring history in `/var/lib/shsm/monitoring.db` are completely preserved during upgrades.
+> - Always execute CLI commands using `sudo -u shsm shsm <command>` or directly via the `/opt/shsm/venv/bin/shsm` binary to maintain database permission integrity.
