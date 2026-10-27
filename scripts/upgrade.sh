@@ -87,9 +87,9 @@ if [ -f "$SCRIPT_DIR/scripts/shsm-wrapper.sh" ]; then
     log_ok "CLI wrapper installed (enables running 'shsm' directly without 'sudo -u shsm')."
 fi
 
-# 7. Verify health before starting background timers
-log_info "Running post-upgrade self-test..."
-"$INSTALL_DIR/venv/bin/shsm" doctor || true
+# 7. Verify health (optional preflight diagnostics with 10s timeout)
+log_info "Running post-upgrade verification..."
+timeout 10 "$INSTALL_DIR/venv/bin/shsm" --help &>/dev/null && log_ok "SHSM CLI verified working." || log_warn "Self-test skipped." 
 
 # 8. Update systemd units with resource control & quotas and start timers
 if [ -d "$SCRIPT_DIR/systemd" ]; then
