@@ -75,7 +75,7 @@ def test_check_ip_blocked_exact_and_subnet():
 """
     def run_side_effect(cmd, timeout=None):
         res = MagicMock()
-        if "iptables" in cmd[0] or (len(cmd) > 1 and "iptables" in cmd[1]):
+        if any("iptables" in c for c in cmd):
             res.ok = True
             res.stdout = ipt_output
             return res

@@ -18,16 +18,22 @@ from shsm.database.connection import Database
 from shsm.logging_config import setup_logging
 
 
-def get_context(config_path: Optional[str] = None) -> Context:
+def get_context(config_path: Optional[str] = None, require_db: bool = True) -> Context:
     cfg = load_config(config_path)
-    db = Database(cfg.db_path)
-    # Ensure migrations are applied only if database is newly initialized
-    try:
-        import os
-        if not os.path.exists(cfg.db_path) or os.path.getsize(cfg.db_path) == 0:
-            db.migrate()
-    except Exception:
-        pass
+    if require_db:
+        db = Database(cfg.db_path)
+        # Ensure migrations are applied only if database is newly initialized
+        try:
+            import os
+            if not os.path.exists(cfg.db_path) or os.path.getsize(cfg.db_path) == 0:
+                db.migrate()
+        except Exception:
+            pass
+    else:
+        # Use an in-memory database instance so that commands not needing historical
+        # state (such as 'blocked', 'ban', 'unban') never block on SQLite file locks.
+        db = Database(":memory:")
+
     setup_logging(
         level=cfg.get("general.log_level", "INFO"),
         log_dir=str(cfg.get("paths.log_dir")),
@@ -763,7 +769,7 @@ def cmd_findings_resolve(click_ctx: click.Context, ident: str, note: str) -> Non
 @click.pass_context
 def cmd_blocked(click_ctx: click.Context, ip: str, check: bool) -> None:
     """Inspect blocked IPs across Fail2Ban and iptables centrally."""
-    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
     from shsm.security import blocked
 
     if ip or check:
@@ -809,7 +815,7 @@ def cmd_blocked(click_ctx: click.Context, ip: str, check: bool) -> None:
 @click.pass_context
 def cmd_ban(click_ctx: click.Context, ip: str, jail: str, iptables: bool) -> None:
     """Ban an abusive or suspicious IP address (Fail2Ban or iptables)."""
-    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
     from shsm.security import blocked
 
     ok, msg = blocked.ban_ip_unified(app_ctx, ip, jail=jail, use_iptables=iptables)
@@ -826,7 +832,7 @@ def cmd_ban(click_ctx: click.Context, ip: str, jail: str, iptables: bool) -> Non
 @click.pass_context
 def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
     """Unban an IP address centrally from both Fail2Ban and iptables."""
-    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
     from shsm.security import blocked
 
     ok, messages = blocked.unban_ip_unified(app_ctx, ip, jail=jail)

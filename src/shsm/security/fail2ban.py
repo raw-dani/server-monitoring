@@ -12,13 +12,30 @@ SOURCE = "fail2ban"
 CATEGORY = "security"
 
 
-def _run_with_sudo_fallback(ctx: Context, cmd: List[str], timeout: float = 10) -> Any:
+def _run_with_sudo_fallback(ctx: Context, cmd: List[str], timeout: float = 6) -> Any:
+    # If not running as root, fail2ban-client and iptables require root privileges.
+    # Running directly as non-root (e.g. 'shsm') will stall or fail on /var/run/fail2ban/fail2ban.sock.
+    # Therefore, try 'sudo -n' first if running as non-root.
+    is_root = False
+    try:
+        import os
+        is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+    except Exception:
+        pass
+
+    sudo_bin = ctx.runner.which("sudo")
+    if not is_root and sudo_bin:
+        res_sudo = ctx.runner.run([sudo_bin, "-n"] + cmd, timeout=timeout)
+        if res_sudo.ok:
+            return res_sudo
+
+    # Otherwise run directly
     res = ctx.runner.run(cmd, timeout=timeout)
     if res.ok:
         return res
-    sudo_bin = ctx.runner.which("sudo")
-    if sudo_bin:
-        # Use -n (non-interactive) to prevent hanging if sudo asks for password
+
+    # If direct failed and we haven't tried sudo yet
+    if is_root and sudo_bin:
         res_sudo = ctx.runner.run([sudo_bin, "-n"] + cmd, timeout=timeout)
         if res_sudo.ok:
             return res_sudo
