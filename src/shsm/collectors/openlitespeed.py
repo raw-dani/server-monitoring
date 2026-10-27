@@ -38,16 +38,23 @@ def collect_process_metrics(ctx: Context, out: CollectorOutput) -> None:
     matched_count = 0
     total_rss = 0
 
-    for p in psutil.process_iter(attrs=["name", "memory_info"]):
-        try:
-            name = (p.info.get("name") or "").lower()
-            if any(target in name for target in proc_names):
-                matched_count += 1
-                mem = p.info.get("memory_info")
-                if mem:
-                    total_rss += getattr(mem, "rss", 0)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    # Under high attack load, thousands of short-lived lsphp processes spawn/die.
+    # We iterate conservatively and limit total inspected to prevent CPU burn.
+    try:
+        for p in psutil.process_iter(attrs=["name"]):
+            try:
+                name = (p.info.get("name") or "").lower()
+                if any(target in name for target in proc_names):
+                    matched_count += 1
+                    # Only query memory for primary daemons to save system calls
+                    if matched_count <= 50:
+                        mem = p.memory_info()
+                        if mem:
+                            total_rss += getattr(mem, "rss", 0)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception:
+        pass
 
     out.metric("openlitespeed.process_count", matched_count)
     out.metric("openlitespeed.memory_bytes", total_rss)
@@ -257,9 +264,10 @@ def collect(ctx: Context) -> CollectorOutput:
             from shsm.security import blocked
             ban_notes = []
             if auto_block_404:
-                for a_ip, a_cnt in abusive_404_ips.items():
-                    # For abusive 404 scanners, execute direct kernel drop via iptables immediately
-                    # to relieve CPU and database load without relying solely on application logs
+                # Limit direct kernel drop to top 10 offenders per execution cycle
+                # to prevent spawning excessive subprocesses during massive bot floods
+                sorted_abusive = sorted(abusive_404_ips.items(), key=lambda x: x[1], reverse=True)[:10]
+                for a_ip, a_cnt in sorted_abusive:
                     b_ok, b_msg = blocked.ban_ip_unified(ctx, a_ip, use_iptables=True)
                     if b_ok:
                         ban_notes.append(f"Auto-dropped {a_ip} in iptables ({a_cnt} 404s)")
