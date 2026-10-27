@@ -10,15 +10,19 @@ if [ ! -x "$SHSM_BIN" ]; then
     exit 1
 fi
 
-# 1. If executed by root, automatically switch to 'shsm' user
-if [ "$(id -u)" -eq 0 ]; then
-    exec su -s /bin/bash shsm -c "$SHSM_BIN \"\$@\"" -- "$@"
-
-# 2. If already executed as 'shsm' user, run directly
-elif [ "$(id -un)" = "shsm" ]; then
+# If already executed as 'shsm' user, run directly
+if [ "$(id -un)" = "shsm" ]; then
     exec "$SHSM_BIN" "$@"
+fi
 
-# 3. If executed by normal user with sudo privileges, invoke via sudo
+# If executed by root, invoke under shsm via sudo or su
+if [ "$(id -u)" -eq 0 ]; then
+    if command -v sudo &>/dev/null; then
+        exec sudo -u shsm -H "$SHSM_BIN" "$@"
+    else
+        exec su -s /bin/bash shsm -c '"$0" "$@"' "$SHSM_BIN" "$@"
+    fi
 else
-    exec sudo -u shsm "$SHSM_BIN" "$@"
+    # If executed by normal user with sudo privileges, invoke via sudo
+    exec sudo -u shsm -H "$SHSM_BIN" "$@"
 fi

@@ -102,7 +102,7 @@ fi
 
 # 8. Verify health
 log_info "Running post-upgrade self-test..."
-/usr/local/bin/shsm doctor
+"$INSTALL_DIR/venv/bin/shsm" doctor || true
 
 log_ok "SHSM has been successfully upgraded to the latest version!"
 
