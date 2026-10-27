@@ -28,7 +28,12 @@ class TailResult:
 
 def _head_hash(fh) -> str:
     fh.seek(0)
-    return hashlib.sha1(fh.read(HEAD_BYTES), usedforsecurity=False).hexdigest()  # noqa: S324 - identity only
+    data = fh.read(HEAD_BYTES)
+    try:
+        return hashlib.sha1(data, usedforsecurity=False).hexdigest()  # noqa: S324 - identity only
+    except TypeError:
+        # Python 3.8 / OpenSSL wrapper does not accept usedforsecurity keyword argument
+        return hashlib.sha1(data).hexdigest()  # noqa: S324
 
 
 class LogTailer:
