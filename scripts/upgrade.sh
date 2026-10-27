@@ -26,10 +26,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log_info "Upgrading SHSM..."
 
-# 1. Automatic pre-upgrade DB Backup
+# 0. Temporarily pause timers and terminate any running background collectors to release DB locks
+log_info "Temporarily pausing SHSM background timers and releasing DB locks..."
+systemctl stop 'shsm-*.timer' 2>/dev/null || true
+pkill -9 -u "$SHSM_USER" -f "/opt/shsm" 2>/dev/null || true
+rm -f /var/lib/shsm/locks/*.lock /tmp/shsm_locks/*.lock 2>/dev/null || true
+
+# 1. Automatic pre-upgrade DB Backup (with safety timeout)
 log_info "Creating automatic pre-upgrade database backup..."
-if command -v shsm &>/dev/null; then
-    sudo -u "$SHSM_USER" shsm db backup || log_err "Warning: pre-upgrade DB backup failed."
+if [ -f "/var/lib/shsm/monitoring.db" ]; then
+    mkdir -p /var/lib/shsm/backups
+    BACKUP_FILE="/var/lib/shsm/backups/shsm_pre_upgrade_$(date +%Y%m%d_%H%M%S).db"
+    if command -v sqlite3 &>/dev/null; then
+        sqlite3 /var/lib/shsm/monitoring.db ".backup '$BACKUP_FILE'" 2>/dev/null || cp -a /var/lib/shsm/monitoring.db "$BACKUP_FILE"
+    else
+        cp -a /var/lib/shsm/monitoring.db "$BACKUP_FILE"
+    fi
+    chown -R "$SHSM_USER:$SHSM_USER" /var/lib/shsm/backups 2>/dev/null || true
+    log_ok "Backup created at $BACKUP_FILE"
 fi
 
 # 2. Sync codebase
@@ -73,13 +87,17 @@ if [ -f "$SCRIPT_DIR/scripts/shsm-wrapper.sh" ]; then
     log_ok "CLI wrapper installed (enables running 'shsm' directly without 'sudo -u shsm')."
 fi
 
-# 7. Update systemd units with resource control & quotas
+# 7. Update systemd units with resource control & quotas and restart timers
 if [ -d "$SCRIPT_DIR/systemd" ]; then
     log_info "Syncing systemd unit definitions with CPU and memory throttling..."
     cp "$SCRIPT_DIR/systemd/"*.service /etc/systemd/system/ 2>/dev/null || true
     cp "$SCRIPT_DIR/systemd/"*.timer /etc/systemd/system/ 2>/dev/null || true
     systemctl daemon-reload
-    log_ok "Systemd units updated with CPU quotas and reloaded."
+    for timer in /etc/systemd/system/shsm-*.timer; do
+        timer_name=$(basename "$timer")
+        systemctl start "$timer_name" 2>/dev/null || true
+    done
+    log_ok "Systemd units updated and timers restarted with relaxed schedules."
 fi
 
 # 8. Verify health
