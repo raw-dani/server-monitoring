@@ -57,7 +57,8 @@ fi
 # Ensure python3-venv is available
 if ! $PYTHON_BIN -m venv --help &>/dev/null; then
     log_warn "Python venv module missing for $PYTHON_BIN. Attempting to install ${PYTHON_BIN}-venv..."
-    apt-get install -y "${PYTHON_BIN}-venv" 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get update -y 2>/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "${PYTHON_BIN}-venv" 2>/dev/null || true
     if ! $PYTHON_BIN -m venv --help &>/dev/null; then
         log_err "Python venv module is missing for $PYTHON_BIN. Run: apt-get install -y ${PYTHON_BIN}-venv"
         exit 1
@@ -134,6 +135,9 @@ if getent group nobody &>/dev/null; then
 fi
 if getent group nogroup &>/dev/null; then
     usermod -aG nogroup "$SHSM_USER" || true
+fi
+if getent group postfix &>/dev/null; then
+    usermod -aG postfix "$SHSM_USER" || true
 fi
 
 

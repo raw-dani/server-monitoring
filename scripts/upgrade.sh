@@ -44,7 +44,7 @@ if [ -f "/var/lib/shsm/monitoring.db" ]; then
     else
         cp -a /var/lib/shsm/monitoring.db "$BACKUP_FILE"
     fi
-    chown -R "$SHSM_USER:$SHSM_USER" /var/lib/shsm/backups 2>/dev/null || true
+    chown -R "$SHSM_USER:$SHSM_GROUP" /var/lib/shsm/backups 2>/dev/null || true
     log_ok "Backup created at $BACKUP_FILE"
 fi
 
@@ -57,6 +57,9 @@ cp -u "$SCRIPT_DIR/pyproject.toml" "$INSTALL_DIR/" 2>/dev/null || true
 log_info "Updating virtual environment packages..."
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip setuptools wheel
 "$INSTALL_DIR/venv/bin/pip" install -e "$INSTALL_DIR"
+
+# Enforce ownership on installed files to prevent permission issues for daemon
+chown -R "$SHSM_USER:$SHSM_GROUP" "$INSTALL_DIR" /var/lib/shsm /var/log/shsm 2>/dev/null || true
 
 # 4. Run database migrations
 log_info "Applying any pending database migrations..."
@@ -72,6 +75,9 @@ if getent group nogroup &>/dev/null; then
 fi
 if getent group adm &>/dev/null; then
     usermod -aG adm "$SHSM_USER" 2>/dev/null || true
+fi
+if getent group postfix &>/dev/null; then
+    usermod -aG postfix "$SHSM_USER" 2>/dev/null || true
 fi
 
 # 6. Update sudoers configuration and CLI wrapper

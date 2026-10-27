@@ -31,3 +31,6 @@ shsm ALL=(ALL) NOPASSWD: /usr/bin/fail2ban-client status, /usr/bin/fail2ban-clie
 # 6. Least-privilege WP-CLI invocation as site owner (never as root!)
 # Allows shsm to run wp-cli as any website user (e.g. sudo -u user123 wp ...)
 shsm ALL=(ALL) NOPASSWD: /usr/local/bin/wp *, /usr/bin/wp *
+
+# 7. Postfix mail queue read-only inspection fallback
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/postqueue -p, /usr/bin/mailq, /usr/bin/postqueue -p

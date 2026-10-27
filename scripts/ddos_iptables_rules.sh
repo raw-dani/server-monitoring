@@ -49,6 +49,12 @@ if command -v iptables > /dev/null 2>&1; then
     iptables -A INPUT -p tcp -m multiport --dports 80,443 -m connlimit --connlimit-above 80 -j REJECT --reject-with tcp-reset
 
     echo "    iptables rate-limiting rules applied successfully."
+    # Persist rules across reboot if iptables persistence packages are installed
+    if command -v netfilter-persistent > /dev/null 2>&1; then
+        netfilter-persistent save > /dev/null 2>&1 || true
+    elif command -v iptables-save > /dev/null 2>&1 && [ -d /etc/iptables ]; then
+        iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+    fi
 else
     echo "    iptables not found; skipping direct rule insertion."
 fi

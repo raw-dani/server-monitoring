@@ -63,6 +63,7 @@ if [ "$PURGE_DATA" = true ]; then
     rm -rf /var/lib/shsm
     rm -rf /var/log/shsm
     rm -rf /etc/shsm
+    rm -f /etc/tmpfiles.d/shsm.conf 2>/dev/null || true
     userdel shsm 2>/dev/null || true
     groupdel shsm 2>/dev/null || true
     log_ok "All data, logs, configuration, and system accounts purged."
