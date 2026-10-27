@@ -81,7 +81,7 @@ if getent group postfix &>/dev/null; then
     usermod -aG postfix "$SHSM_USER" 2>/dev/null || true
 fi
 
-# 6. Update sudoers configuration and CLI wrapper
+# 6. Update sudoers configuration and CLI link
 if [ -f "$SCRIPT_DIR/scripts/shsm.sudoers" ]; then
     log_info "Updating sudoers configuration at /etc/sudoers.d/shsm..."
     cp "$SCRIPT_DIR/scripts/shsm.sudoers" /etc/sudoers.d/shsm
@@ -89,12 +89,9 @@ if [ -f "$SCRIPT_DIR/scripts/shsm.sudoers" ]; then
     visudo -c -f /etc/sudoers.d/shsm 2>/dev/null || true
 fi
 
-if [ -f "$SCRIPT_DIR/scripts/shsm-wrapper.sh" ]; then
-    log_info "Installing auto-switch CLI wrapper to /usr/local/bin/shsm..."
-    cp "$SCRIPT_DIR/scripts/shsm-wrapper.sh" /usr/local/bin/shsm
-    chmod 0755 /usr/local/bin/shsm
-    log_ok "CLI wrapper installed (enables running 'shsm' directly without 'sudo -u shsm')."
-fi
+log_info "Linking /usr/local/bin/shsm directly to virtualenv..."
+ln -sf "$INSTALL_DIR/venv/bin/shsm" /usr/local/bin/shsm
+log_ok "Linked /usr/local/bin/shsm"
 
 # 7. Verify health (optional preflight diagnostics with 10s timeout)
 log_info "Running post-upgrade verification..."
