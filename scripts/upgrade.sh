@@ -9,10 +9,12 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_ok() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_err() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 if [[ $EUID -ne 0 ]]; then
@@ -89,7 +91,7 @@ fi
 
 # 7. Verify health (optional preflight diagnostics with 10s timeout)
 log_info "Running post-upgrade verification..."
-timeout 10 "$INSTALL_DIR/venv/bin/shsm" --help &>/dev/null && log_ok "SHSM CLI verified working." || log_warn "Self-test skipped." 
+if timeout 10 "$INSTALL_DIR/venv/bin/shsm" --help &>/dev/null; then log_ok "SHSM CLI verified working."; else log_warn "Self-test skipped."; fi 
 
 # 8. Update systemd units with resource control & quotas and start timers
 if [ -d "$SCRIPT_DIR/systemd" ]; then
