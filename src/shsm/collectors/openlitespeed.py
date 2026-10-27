@@ -254,33 +254,17 @@ def collect(ctx: Context) -> CollectorOutput:
 
         out.metric("openlitespeed.aggressive_404_scanners", len(abusive_404_ips))
         if abusive_404_ips:
-            from shsm.security import fail2ban
+            from shsm.security import blocked
             ban_notes = []
             if auto_block_404:
                 for a_ip, a_cnt in abusive_404_ips.items():
-                    # Attempt Fail2Ban ban, or fallback to direct iptables drop
-                    b_ok, b_msg = fail2ban.ban_ip(ctx, a_ip, jail=target_jail)
-                    if not b_ok:
-                        # Direct kernel drop fallback via iptables
-                        ipt_bin = ctx.runner.which("iptables") or "/usr/sbin/iptables"
-                        # Check if already dropped
-                        c_cmd = [ipt_bin, "-C", "INPUT", "-s", a_ip, "-j", "DROP"]
-                        res_c = ctx.runner.run(c_cmd)
-                        if not res_c.ok and ctx.runner.which("sudo"):
-                            res_c = ctx.runner.run(["sudo"] + c_cmd)
-                        if not res_c.ok:
-                            i_cmd = [ipt_bin, "-I", "INPUT", "-s", a_ip, "-j", "DROP"]
-                            res_i = ctx.runner.run(i_cmd)
-                            if not res_i.ok and ctx.runner.which("sudo"):
-                                res_i = ctx.runner.run(["sudo"] + i_cmd)
-                            if res_i.ok:
-                                ban_notes.append(f"Auto-dropped {a_ip} in iptables ({a_cnt} 404s)")
-                            else:
-                                ban_notes.append(f"Failed iptables drop {a_ip}: {res_i.stderr or res_i.message}")
-                        else:
-                            ban_notes.append(f"Already dropped {a_ip} in iptables")
-                    elif b_ok:
-                        ban_notes.append(f"Auto-banned {a_ip} in Fail2Ban ({a_cnt} 404s)")
+                    # For abusive 404 scanners, execute direct kernel drop via iptables immediately
+                    # to relieve CPU and database load without relying solely on application logs
+                    b_ok, b_msg = blocked.ban_ip_unified(ctx, a_ip, use_iptables=True)
+                    if b_ok:
+                        ban_notes.append(f"Auto-dropped {a_ip} in iptables ({a_cnt} 404s)")
+                    else:
+                        ban_notes.append(f"Failed iptables drop {a_ip}: {b_msg}")
 
             top_offender = max(abusive_404_ips.items(), key=lambda x: x[1])
             ban_suffix = f" Actions taken: {'; '.join(ban_notes)}." if ban_notes else ""

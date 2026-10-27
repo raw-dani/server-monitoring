@@ -404,9 +404,15 @@ sudo -u shsm shsm doctor
      BLOCKED_IPS=$(sudo iptables -L INPUT -n | grep DROP | awk '{print $4}' | grep -v "0.0.0.0/0" | tr '\n' '|')
 
      # Filter 10 IP teratas penghasil 404 yang BELUM diblokir
-     awk '$9 == "404" {print $1}' /usr/local/lsws/logs/access.log | \
-     grep -Ev "(${BLOCKED_IPS:-none}|127.0.0.1|^::1)" | \
-     sort | uniq -c | sort -nr | head -n 10
+     for ip in $(awk '$9 == "404" {print $1}' /usr/local/lsws/logs/access.log | grep -Ev "127.0.0.1|^::1" | sort | uniq -c | sort -nr | head -n 10 | awk '{print $2}'); do
+         rule=$(sudo iptables -L INPUT -n -v | grep -w "$ip")
+         if [ -n "$rule" ]; then
+            echo -e "[BLOCKED in iptables] $ip -> $rule"
+         else
+            echo -e "[NOT BLOCKED - Masih Lolos] $ip"
+         fi
+     done
+
      ```
      *Jika ingin memblokir IP baru tersebut secara manual sekaligus:*
      ```bash
