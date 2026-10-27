@@ -16,8 +16,10 @@ def _run_with_sudo_fallback(ctx: Context, cmd: List[str], timeout: float = 10) -
     res = ctx.runner.run(cmd, timeout=timeout)
     if res.ok:
         return res
-    if ctx.runner.which("sudo"):
-        res_sudo = ctx.runner.run(["sudo"] + cmd, timeout=timeout)
+    sudo_bin = ctx.runner.which("sudo")
+    if sudo_bin:
+        # Use -n (non-interactive) to prevent hanging if sudo asks for password
+        res_sudo = ctx.runner.run([sudo_bin, "-n"] + cmd, timeout=timeout)
         if res_sudo.ok:
             return res_sudo
     return res

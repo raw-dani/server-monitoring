@@ -18,8 +18,9 @@ def _exec_firewall_cmd(ctx: Context, cmd: List[str], timeout: float = 10) -> Any
     res = ctx.runner.run(cmd, timeout=timeout)
     if res.ok:
         return res
-    if ctx.runner.which("sudo"):
-        res_sudo = ctx.runner.run(["sudo"] + cmd, timeout=timeout)
+    sudo_bin = ctx.runner.which("sudo")
+    if sudo_bin:
+        res_sudo = ctx.runner.run([sudo_bin, "-n"] + cmd, timeout=timeout)
         if res_sudo.ok:
             return res_sudo
     return res
