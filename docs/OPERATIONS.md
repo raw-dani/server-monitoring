@@ -3,8 +3,10 @@
 Panduan operasional harian untuk administrator sistem menggunakan **SHSM (Server Health & Security Monitoring)**.
 
 > [!TIP]
-> **Shorthand Execution**: Anda dapat langsung menjalankan perintah cukup dengan `shsm <perintah>` (misal `shsm status`, `shsm blocked`).
-> Wrapper bawaan SHSM di `/usr/local/bin/shsm` secara otomatis mendeteksi dan menurunkan hak akses (*drop privileges*) ke user `shsm` di belakang layar agar integritas izin file database tetap terjaga. Anda juga tetap dapat memanggil via `sudo -u shsm shsm <perintah>`.
+> **Standar Eksekusi CLI**:
+> - Disarankan selalu menjalankan perintah menggunakan: `sudo -u shsm shsm <perintah>` (contoh: `sudo -u shsm shsm doctor`, `sudo -u shsm shsm status`).
+> - Menjalankan via user `shsm` menjamin integritas izin file SQLite (`/var/lib/shsm/monitoring.db`) dan file lock agar tidak berubah kepemilikannya menjadi root.
+> - Binary CLI di `/usr/local/bin/shsm` terhubung via symlink ke virtual environment `/opt/shsm/venv/bin/shsm`.
 
 ---
 

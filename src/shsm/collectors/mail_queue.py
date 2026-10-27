@@ -24,7 +24,7 @@ CATEGORY = "health"
 POSTFIX_SPOOL = "/var/spool/postfix"
 QUEUE_DIRS = ["incoming", "active", "deferred", "hold"]
 
-# Standard MTA process names allowed to establish outbound port 25/465/587 connections
+# Standard MTA and monitor process names allowed to establish outbound port 25/465/587 connections
 ALLOWED_MTA_PROCESSES = {
     "master",
     "qmgr",
@@ -36,6 +36,7 @@ ALLOWED_MTA_PROCESSES = {
     "exim4",
     "sendmail",
     "dovecot",
+    "shsm",
 }
 
 
@@ -151,13 +152,18 @@ def check_outbound_spam_connections(ctx: Context) -> List[Dict[str, Any]]:
             u_name = "unknown"
             cmdline = ""
 
-        # Check if process is an authorized MTA
-        if pname in ALLOWED_MTA_PROCESSES or u_name in ("postfix", "mail", "Debian-exim"):
+        # Check if process is an authorized MTA or SHSM itself
+        if pname in ALLOWED_MTA_PROCESSES or u_name in ("postfix", "mail", "Debian-exim", "shsm") or "shsm" in cmdline:
             continue
 
         r_ip = c.raddr.ip if hasattr(c.raddr, "ip") else str(c.raddr[0])
         # Loopback is normal for local relay
         if r_ip in ("127.0.0.1", "::1", "localhost"):
+            continue
+
+        # Whitelist legitimate outbound SMTP host configured in config.yaml
+        configured_smtp = ctx.config.get("email.smtp_host")
+        if configured_smtp and (configured_smtp == r_ip or configured_smtp in cmdline):
             continue
 
         flagged.append({
