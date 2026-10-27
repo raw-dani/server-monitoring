@@ -87,7 +87,11 @@ if [ -f "$SCRIPT_DIR/scripts/shsm-wrapper.sh" ]; then
     log_ok "CLI wrapper installed (enables running 'shsm' directly without 'sudo -u shsm')."
 fi
 
-# 7. Update systemd units with resource control & quotas and restart timers
+# 7. Verify health before starting background timers
+log_info "Running post-upgrade self-test..."
+"$INSTALL_DIR/venv/bin/shsm" doctor || true
+
+# 8. Update systemd units with resource control & quotas and start timers
 if [ -d "$SCRIPT_DIR/systemd" ]; then
     log_info "Syncing systemd unit definitions with CPU and memory throttling..."
     cp "$SCRIPT_DIR/systemd/"*.service /etc/systemd/system/ 2>/dev/null || true
@@ -99,10 +103,6 @@ if [ -d "$SCRIPT_DIR/systemd" ]; then
     done
     log_ok "Systemd units updated and timers restarted with relaxed schedules."
 fi
-
-# 8. Verify health
-log_info "Running post-upgrade self-test..."
-"$INSTALL_DIR/venv/bin/shsm" doctor || true
 
 log_ok "SHSM has been successfully upgraded to the latest version!"
 
