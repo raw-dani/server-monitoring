@@ -3,7 +3,7 @@ Description=SHSM timer for CPU/RAM/swap/disk/network/process metrics
 Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
-OnCalendar=*-*-* *:*:00
+OnCalendar=*-*-* *:0/2:00
 Persistent=true
 Unit=shsm-health.service
 

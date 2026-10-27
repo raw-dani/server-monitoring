@@ -174,9 +174,15 @@ log_info "Installing Python dependencies..."
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip setuptools wheel
 "$INSTALL_DIR/venv/bin/pip" install -e "$INSTALL_DIR"
 
-# Symlink CLI binary to /usr/local/bin/shsm
-ln -sf "$INSTALL_DIR/venv/bin/shsm" /usr/local/bin/shsm
-log_ok "Linked /usr/local/bin/shsm"
+# Install CLI wrapper to /usr/local/bin/shsm
+if [ -f "$SCRIPT_DIR/scripts/shsm-wrapper.sh" ]; then
+    cp "$SCRIPT_DIR/scripts/shsm-wrapper.sh" /usr/local/bin/shsm
+    chmod 0755 /usr/local/bin/shsm
+    log_ok "Installed auto-switch CLI wrapper to /usr/local/bin/shsm"
+else
+    ln -sf "$INSTALL_DIR/venv/bin/shsm" /usr/local/bin/shsm
+    log_ok "Linked /usr/local/bin/shsm"
+fi
 
 # 5. Initialize Configuration if not exists
 if [ ! -f "$CONFIG_DIR/config.yaml" ]; then

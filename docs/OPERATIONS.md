@@ -3,7 +3,8 @@
 Panduan operasional harian untuk administrator sistem menggunakan **SHSM (Server Health & Security Monitoring)**.
 
 > [!TIP]
-> Jalankan perintah CLI SHSM menggunakan user khusus non-root: `sudo -u shsm shsm <perintah>` untuk mematuhi prinsip *Least Privilege*.
+> **Shorthand Execution**: Anda dapat langsung menjalankan perintah cukup dengan `shsm <perintah>` (misal `shsm status`, `shsm blocked`).
+> Wrapper bawaan SHSM di `/usr/local/bin/shsm` secara otomatis mendeteksi dan menurunkan hak akses (*drop privileges*) ke user `shsm` di belakang layar agar integritas izin file database tetap terjaga. Anda juga tetap dapat memanggil via `sudo -u shsm shsm <perintah>`.
 
 ---
 
@@ -124,16 +125,24 @@ sudo -u shsm shsm security scan --only heuristic
 sudo -u shsm shsm security scan --only clamav,rootkit
 ```
 
-### Manajemen Blokir IP (Fail2Ban Active Response)
-SHSM dapat langsung memerintahkan Fail2Ban untuk memblokir atau membuka blokir IP mencurigakan/penyerang:
+### Manajemen Blokir IP Terpusat (Fail2Ban + iptables)
+SHSM menyediakan manajemen terpusat untuk memantau, memeriksa, memblokir, dan membuka blokir IP baik yang berada di Fail2Ban maupun di iptables:
 ```bash
-# Blokir IP penyerang ke Fail2Ban secara instan
+# 1. Melihat semua IP & subnet yang sedang diblokir (dari Fail2Ban dan iptables):
+sudo -u shsm shsm blocked
+
+# 2. Memeriksa apakah IP tertentu sedang diblokir (termasuk deteksi jika terkena blokir subnet CIDR):
+sudo -u shsm shsm blocked <IP_ADDRESS>
+
+# 3. Blokir IP penyerang:
+# Default: Dikirim ke Fail2Ban (dengan fallback otomatis ke iptables jika Fail2Ban tidak aktif)
 sudo -u shsm shsm ban <IP_ADDRESS>
-
-# Tentukan jail tertentu (opsional, default: auto-detect ols-scanner / openlitespeed)
+# Tentukan jail tertentu:
 sudo -u shsm shsm ban <IP_ADDRESS> --jail ols-scanner
+# Atau blokir langsung di iptables (DROP rule):
+sudo -u shsm shsm ban <IP_ADDRESS> --iptables
 
-# Buka blokir IP
+# 4. Buka blokir IP terpusat (otomatis membersihkan dari Fail2Ban DAN iptables sekaligus):
 sudo -u shsm shsm unban <IP_ADDRESS>
 ```
 

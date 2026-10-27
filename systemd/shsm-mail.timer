@@ -1,5 +1,5 @@
 [Unit]
-Description=SHSM timer for Postfix mail queue and outbound spam connection audit
+Description=SHSM timer for Postfix queue & unauthorized outbound SMTP checks
 Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]

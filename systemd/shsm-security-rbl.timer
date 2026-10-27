@@ -1,11 +1,11 @@
 [Unit]
-Description=SHSM timer for DNSBL/RBL spam blacklist reputation check
+Description=SHSM timer for DNSBL / RBL spam blacklist status checks
 Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
 OnCalendar=*-*-* 00/6:25:00
-RandomizedDelaySec=60
 Persistent=true
+RandomizedDelaySec=60
 Unit=shsm-security-rbl.service
 
 [Install]

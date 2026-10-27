@@ -217,7 +217,7 @@ sudo -u shsm shsm doctor
        firewall-cmd --zone=drop --remove-source=<IP_PENYERANG> --permanent
        firewall-cmd --reload
        ```
-  4. **Setup Auto-Ban Otomatis Menggunakan Fail2Ban (UFW / Firewalld)**:
+  4. **Setup Auto-Ban Otomatis Menggunakan Fail2Ban (UFW / Firewalld / Iptables)**:
      Agar IP yang memindai file `.env`, URL exploit, atau flooding `xmlrpc.php` otomatis diblokir oleh firewall:
      - **Buat filter Fail2Ban** di `/etc/fail2ban/filter.d/ols-scanner.conf`:
        ```ini
@@ -228,41 +228,76 @@ sudo -u shsm shsm doctor
        ignoreregex =
        ```
      - **Aktifkan jail Fail2Ban** di `/etc/fail2ban/jail.d/ols-scanner.local`:
+       > [!TIP]
+       > Gunakan `backend = polling` agar Fail2ban tidak mengalami *stale file handle* pada log OpenLiteSpeed. Set `maxretry = 1` atau `2` karena bot scanner exploit `.env`/`.git` sering berganti IP setelah 1-2 request, dan user normal tidak akan pernah mengakses file tersebut.
+       > Pastikan juga menambahkan `ignoreip` untuk melindungi IP server Anda sendiri dan IP admin dari auto-ban.
+
        - **Pilihan A: Menggunakan UFW (`banaction = ufw`) [Direkomendasikan untuk Ubuntu/CyberPanel]**:
          ```ini
          [ols-scanner]
          enabled   = true
+         backend   = polling
          port      = http,https
          filter    = ols-scanner
          logpath   = /usr/local/lsws/logs/access.log
-         maxretry  = 3
+         maxretry  = 1
          findtime  = 600
          bantime   = 86400
          banaction = ufw
          action    = %(action_)s
+         ignoreip  = 127.0.0.1/8 ::1 <IP_PUBLIK_SERVER> <IP_ADMIN>
          ```
        - **Pilihan B: Menggunakan Firewalld (`banaction = firewallcmd-rich-rules`)**:
          ```ini
          [ols-scanner]
          enabled   = true
+         backend   = polling
          port      = http,https
          filter    = ols-scanner
          logpath   = /usr/local/lsws/logs/access.log
-         maxretry  = 3
+         maxretry  = 1
          findtime  = 600
          bantime   = 86400
          banaction = firewallcmd-rich-rules
          action    = %(action_)s
+         ignoreip  = 127.0.0.1/8 ::1 <IP_PUBLIK_SERVER> <IP_ADMIN>
          ```
+       - **Pilihan C: Menggunakan Iptables Langsung (`banaction = iptables-multiport`)**:
+         ```ini
+         [ols-scanner]
+         enabled   = true
+         backend   = polling
+         port      = http,https
+         filter    = ols-scanner
+         logpath   = /usr/local/lsws/logs/access.log
+         maxretry  = 1
+         findtime  = 600
+         bantime   = 86400
+         banaction = iptables-multiport
+         action    = %(action_)s
+         ignoreip  = 127.0.0.1/8 ::1 <IP_PUBLIK_SERVER> <IP_ADMIN>
+         ```
+     - **Whitelist IP Server Secara Global (Opsional, Berlaku untuk Semua Jail)**:
+       Tambahkan di `/etc/fail2ban/jail.local`:
+       ```ini
+       [DEFAULT]
+       ignoreip = 127.0.0.1/8 ::1 <IP_PUBLIK_SERVER> <IP_ADMIN>
+       ```
      - **Reload Fail2Ban**:
        ```bash
        fail2ban-client reload
+       ```
+     - **Verifikasi Whitelist IP**:
+       ```bash
+       fail2ban-client get ols-scanner ignoreip
        ```
      - **Pantau status IP yang terkena auto-ban**:
        ```bash
        fail2ban-client status ols-scanner
        # Jika menggunakan UFW, aturan blokir otomatis terlihat di status UFW:
        sudo ufw status numbered
+       # Jika menggunakan iptables langsung:
+       sudo iptables -L INPUT -n -v | grep f2b
        ```
      - **Membuka blokir IP tertentu dari jail**:
        ```bash

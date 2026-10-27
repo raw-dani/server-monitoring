@@ -1,5 +1,5 @@
 [Unit]
-Description=SHSM DNSBL/RBL spam blacklist reputation check
+Description=SHSM DNSBL / RBL spam blacklist status checks
 Documentation=https://github.com/gmteknologi/shsm
 After=network.target local-fs.target
 
@@ -11,9 +11,11 @@ ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml security rbl
 TimeoutStartSec=180
 StandardOutput=journal
 StandardError=journal
-Nice=10
+Nice=19
+CPUSchedulingPolicy=idle
 IOSchedulingClass=best-effort
-IOSchedulingPriority=6
-CPUQuota=40%
+IOSchedulingPriority=7
+CPUQuota=20%
 MemoryHigh=192M
 MemoryMax=256M
+IOWeight=100

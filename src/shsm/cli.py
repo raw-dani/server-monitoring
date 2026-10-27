@@ -757,16 +757,55 @@ def cmd_findings_resolve(click_ctx: click.Context, ident: str, note: str) -> Non
 
 
 # ---------------------------------------------------------------- firewall & fail2ban actions
+@main.command("blocked")
+@click.argument("ip", required=False)
+@click.option("--check", is_flag=True, help="Check if specific IP is blocked")
+@click.pass_context
+def cmd_blocked(click_ctx: click.Context, ip: str, check: bool) -> None:
+    """Inspect blocked IPs across Fail2Ban and iptables centrally."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.security import blocked
+
+    if ip or check:
+        target_ip = ip or ""
+        res = blocked.check_ip_blocked(app_ctx, target_ip)
+        if res["is_blocked"]:
+            click.secho(f"[BLOCKED] IP '{target_ip}' is CURRENTLY BLOCKED by {len(res['matches'])} rule(s):", fg="red", bold=True)
+            for m in res["matches"]:
+                matched_sub = f" (via subnet {m['matched_subnet']})" if "matched_subnet" in m else ""
+                click.echo(f"  * Source: {m['source'].upper()} | Chain/Jail: {m['jail_or_chain']} | Target: {m['target']}{matched_sub} | Note: {m['note']}")
+        else:
+            click.secho(f"[ALLOWED] IP '{target_ip}' is NOT blocked in Fail2Ban or iptables.", fg="green", bold=True)
+        return
+
+    # List all blocked IPs and subnets
+    items = blocked.list_all_blocked(app_ctx)
+    f2b_count = sum(1 for x in items if x["source"] == "fail2ban")
+    ipt_count = sum(1 for x in items if x["source"] == "iptables")
+
+    click.secho(f"=== Centralized Blocked IPs & Rules ({len(items)} Total: {f2b_count} Fail2Ban, {ipt_count} iptables) ===", bold=True)
+    if not items:
+        click.secho("No blocked IPs or drop rules found.", fg="green")
+        return
+
+    click.echo(f"{'Source':<10} {'Target / IP / Subnet':<24} {'Jail/Chain':<14} {'Pkts':<8} {'Note'}")
+    click.echo("-" * 75)
+    for item in items:
+        col = "yellow" if item["source"] == "fail2ban" else "red"
+        click.secho(f"{item['source']:<10} {item['target']:<24} {item['jail_or_chain']:<14} {item['packets']:<8} {item['note']}", fg=col)
+
+
 @main.command("ban")
 @click.argument("ip")
 @click.option("--jail", default="auto", help="Target Fail2Ban jail (default: auto)")
+@click.option("--iptables", is_flag=True, help="Block directly via iptables DROP rule")
 @click.pass_context
-def cmd_ban(click_ctx: click.Context, ip: str, jail: str) -> None:
-    """Ban an abusive or suspicious IP address via Fail2Ban."""
+def cmd_ban(click_ctx: click.Context, ip: str, jail: str, iptables: bool) -> None:
+    """Ban an abusive or suspicious IP address (Fail2Ban or iptables)."""
     app_ctx = get_context(click_ctx.obj.get("config_path"))
-    from shsm.security import fail2ban
+    from shsm.security import blocked
 
-    ok, msg = fail2ban.ban_ip(app_ctx, ip, jail=jail)
+    ok, msg = blocked.ban_ip_unified(app_ctx, ip, jail=jail, use_iptables=iptables)
     if ok:
         click.secho(f"[SUCCESS] {msg}", fg="green", bold=True)
     else:
@@ -779,16 +818,21 @@ def cmd_ban(click_ctx: click.Context, ip: str, jail: str) -> None:
 @click.option("--jail", default="auto", help="Target Fail2Ban jail (default: auto/all)")
 @click.pass_context
 def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
-    """Unban an IP address from Fail2Ban."""
+    """Unban an IP address centrally from both Fail2Ban and iptables."""
     app_ctx = get_context(click_ctx.obj.get("config_path"))
-    from shsm.security import fail2ban
+    from shsm.security import blocked
 
-    ok, msg = fail2ban.unban_ip(app_ctx, ip, jail=jail)
-    if ok:
-        click.secho(f"[SUCCESS] {msg}", fg="green", bold=True)
-    else:
-        click.secho(f"[FAILED] {msg}", fg="red", bold=True)
-        sys.exit(1)
+    ok, messages = blocked.unban_ip_unified(app_ctx, ip, jail=jail)
+    for m in messages:
+        if "Deleted" in m or "unbanned" in m or "Success" in m:
+            click.secho(f"[SUCCESS] {m}", fg="green")
+        elif "No direct DROP" in m or "not installed" in m:
+            click.echo(f"[INFO] {m}")
+        else:
+            click.secho(f"[NOTICE] {m}", fg="yellow")
+
+    if not ok:
+        click.secho(f"[WARNING] No active bans found or unban could not be confirmed for {ip}.", fg="yellow")
 
 
 if __name__ == "__main__":

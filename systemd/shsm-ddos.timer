@@ -1,9 +1,9 @@
 [Unit]
-Description=SHSM timer for DDoS socket flood and concurrent connection audit
+Description=SHSM timer for DDoS socket flood & concurrent connection audit
 Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
-OnCalendar=*-*-* *:0/2:00
+OnCalendar=*-*-* *:0/3:30
 Persistent=true
 Unit=shsm-ddos.service
 

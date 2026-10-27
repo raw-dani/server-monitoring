@@ -29,16 +29,16 @@ def build_jobs(schedule: Optional[Dict[str, Any]] = None) -> List[JobDef]:
     mday = int(s.get("monthly_day", 1))
     mtime = s.get("monthly_time", "07:00")
     return [
-        JobDef("health", ["collect", "health"], "*-*-* *:*:00", "CPU/RAM/swap/disk/network/process metrics",
-               max_age_seconds=600, timeout_seconds=120),
-        JobDef("services", ["collect", "services"], "*-*-* *:*:30", "systemd service monitoring",
-               max_age_seconds=600, timeout_seconds=120),
-        JobDef("databases", ["collect", "databases"], "*-*-* *:0/5:00", "MariaDB and Redis checks", root=True,
+        JobDef("health", ["collect", "health"], "*-*-* *:0/2:00", "CPU/RAM/swap/disk/network/process metrics",
+               max_age_seconds=900, timeout_seconds=120),
+        JobDef("services", ["collect", "services"], "*-*-* *:1/5:00", "systemd service monitoring",
+               max_age_seconds=1200, timeout_seconds=120),
+        JobDef("databases", ["collect", "databases"], "*-*-* *:3/5:00", "MariaDB and Redis checks", root=True,
                max_age_seconds=1800, timeout_seconds=180),
         JobDef("openlitespeed", ["collect", "openlitespeed"], "*-*-* *:2/5:00", "OpenLiteSpeed log parsing",
                root=True, max_age_seconds=1800, timeout_seconds=300),
-        JobDef("ddos", ["collect", "ddos"], "*-*-* *:0/2:00", "DDoS socket flood & concurrent connection audit",
-               max_age_seconds=600, timeout_seconds=60),
+        JobDef("ddos", ["collect", "ddos"], "*-*-* *:0/3:30", "DDoS socket flood & concurrent connection audit",
+               max_age_seconds=900, timeout_seconds=60),
         JobDef("mail", ["collect", "mail"], "*-*-* *:4/10:00", "Postfix queue & unauthorized outbound SMTP checks",
                root=True, max_age_seconds=1800, timeout_seconds=120),
         JobDef("security-rbl", ["security", "rbl"], "*-*-* 00/6:25:00", "DNSBL / RBL spam blacklist status checks",

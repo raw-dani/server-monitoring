@@ -3,7 +3,7 @@ Description=SHSM timer for MariaDB and Redis checks
 Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
-OnCalendar=*-*-* *:0/5:00
+OnCalendar=*-*-* *:3/5:00
 Persistent=true
 Unit=shsm-databases.service
 

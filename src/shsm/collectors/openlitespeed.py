@@ -135,8 +135,8 @@ def collect(ctx: Context) -> CollectorOutput:
 
     access_log = str(ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
     error_log = str(ctx.config.get("openlitespeed.error_log", "/usr/local/lsws/logs/error.log"))
-    max_bytes = int(ctx.config.get("openlitespeed.max_bytes_per_run", 20 * 1024 * 1024))
-    max_lines = int(ctx.config.get("openlitespeed.max_lines_per_run", 400000))
+    max_bytes = int(ctx.config.get("openlitespeed.max_bytes_per_run", 5 * 1024 * 1024))
+    max_lines = int(ctx.config.get("openlitespeed.max_lines_per_run", 50000))
 
     if not os.path.exists(access_log) and not os.path.exists(error_log):
         if enabled is True:

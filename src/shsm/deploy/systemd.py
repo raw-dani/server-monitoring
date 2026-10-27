@@ -12,26 +12,28 @@ def generate_service_unit(job: JobDef, bin_path: str = "/opt/shsm/venv/bin/shsm"
     args_str = " ".join(job.argv)
     user_line = "User=root\nGroup=root" if job.root else "User=shsm\nGroup=shsm"
     
-    # Resource control & throttling to prevent server overload
+    # Resource control & strict throttling to prevent CPU contention
     resource_lines = []
     if job.heavy:
         resource_lines.extend([
             "Nice=19",
-            "IOSchedulingClass=best-effort",
-            "IOSchedulingPriority=7",
-            "CPUQuota=30%",
+            "CPUSchedulingPolicy=idle",
+            "IOSchedulingClass=idle",
+            "CPUQuota=15%",
             "MemoryHigh=256M",
             "MemoryMax=384M",
-            "IOWeight=100",
+            "IOWeight=50",
         ])
     else:
         resource_lines.extend([
-            "Nice=10",
+            "Nice=19",
+            "CPUSchedulingPolicy=idle",
             "IOSchedulingClass=best-effort",
-            "IOSchedulingPriority=6",
-            "CPUQuota=40%",
+            "IOSchedulingPriority=7",
+            "CPUQuota=20%",
             "MemoryHigh=192M",
             "MemoryMax=256M",
+            "IOWeight=100",
         ])
 
     lines = [

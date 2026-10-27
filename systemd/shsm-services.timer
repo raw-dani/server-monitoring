@@ -3,7 +3,7 @@ Description=SHSM timer for systemd service monitoring
 Documentation=https://github.com/gmteknologi/shsm
 
 [Timer]
-OnCalendar=*-*-* *:*:30
+OnCalendar=*-*-* *:1/5:00
 Persistent=true
 Unit=shsm-services.service
 
