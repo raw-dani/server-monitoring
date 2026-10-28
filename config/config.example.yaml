@@ -35,8 +35,20 @@ email:
   # Sender and Recipients
   from_name: GM Teknologi Server Monitor
   from_address: ""                    # e.g. alerts@yourdomain.com (Required by SendGrid/Brevo/Mailtrap)
+  # Penerima email notifikasi insiden / kejadian darurat / serangan server
   recipients:
-    - rohmataliwardani@gmail.com
+    - [EMAIL_ADDRESS]
+
+  # Opsional: Email khusus untuk report (jika ingin berbeda dari email alert insiden)
+  # Jika diisi, report mingguan & bulanan dikirim ke sini (bukan ke 'recipients' di atas)
+  # report_recipients:
+  #   - report-team@yourdomain.com
+
+  # Opsional: Jika ingin membedakan penerima per jenis report secara spesifik
+  weekly_recipients:
+    - [EMAIL_ADDRESS]
+  monthly_recipients:
+    - [EMAIL_ADDRESS]
 
   # Reliability & Retries
   timeout_seconds: 20

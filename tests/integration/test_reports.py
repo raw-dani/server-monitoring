@@ -93,3 +93,36 @@ def test_pdf_report_generation(temp_dir, sample_config):
     with open(res_path, "rb") as f:
         header = f.read(4)
         assert header == b"%PDF"
+
+
+def test_report_email_recipient_routing(test_db, sample_config, monkeypatch):
+    from unittest.mock import MagicMock
+    from shsm.core.context import Context
+    from shsm.notifications.smtp import SMTPTransport
+    from shsm.reporting.weekly import generate_weekly_report
+    from shsm.reporting.monthly import generate_monthly_report
+
+    mock_send = MagicMock(return_value=(True, 1, None))
+    monkeypatch.setattr(SMTPTransport, "send_email", mock_send)
+
+    cfg_data = sample_config.data
+    cfg_data["email"]["recipients"] = ["security-alert@example.com"]
+    cfg_data["email"]["weekly_recipients"] = ["weekly-team@example.com"]
+    cfg_data["email"]["monthly_recipients"] = ["monthly-team@example.com"]
+
+    ctx = Context(sample_config, test_db)
+
+    # Weekly report email
+    generate_weekly_report(ctx, send_email=True)
+    assert mock_send.call_count == 1
+    call_kwargs = mock_send.call_args[1]
+    assert call_kwargs["recipients"] == ["weekly-team@example.com"]
+    assert "security-alert@example.com" not in call_kwargs["recipients"]
+
+    # Monthly report email
+    mock_send.reset_mock()
+    generate_monthly_report(ctx, send_email=True)
+    assert mock_send.call_count == 1
+    call_kwargs = mock_send.call_args[1]
+    assert call_kwargs["recipients"] == ["monthly-team@example.com"]
+    assert "security-alert@example.com" not in call_kwargs["recipients"]

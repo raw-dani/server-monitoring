@@ -109,7 +109,11 @@ def generate_monthly_report(
         hostname = socket.gethostname()
         subject = f"[MONTHLY][{hostname}] Server Health & Security Report - {date_tag}"
         transport = SMTPTransport(ctx)
-        recipients = list(ctx.config.get("email.recipients", ["rohmataliwardani@gmail.com"]))
+        recipients = (
+            list(ctx.config.get("email.monthly_recipients", []))
+            or list(ctx.config.get("email.report_recipients", []))
+            or list(ctx.config.get("email.recipients", ["rohmataliwardani@gmail.com"]))
+        )
         ok, attempts, err = transport.send_email(
             subject=subject,
             html_body=html_content,

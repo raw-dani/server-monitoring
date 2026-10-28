@@ -41,3 +41,18 @@ def test_lock_dir_default():
     cfg = Config(DEFAULTS)
     assert cfg.get("paths.lock_dir") == "/var/lib/shsm/locks"
 
+
+def test_report_recipients_config_validation():
+    data = copy.deepcopy(DEFAULTS)
+    data["email"]["weekly_recipients"] = ["weekly-report@example.com"]
+    data["email"]["monthly_recipients"] = ["monthly-report@example.com"]
+    data["email"]["report_recipients"] = ["general-report@example.com"]
+    res = validate_config(data)
+    assert res.ok
+
+    # Test invalid email format in report_recipients
+    data["email"]["weekly_recipients"] = ["invalid-email"]
+    res_bad = validate_config(data)
+    assert not res_bad.ok
+    assert any("weekly_recipients contains an invalid address" in err for err in res_bad.errors)
+

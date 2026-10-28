@@ -54,6 +54,9 @@ DEFAULTS: Dict[str, Any] = {
         "from_name": "GM Teknologi Server Monitor",
         "from_address": "",
         "recipients": ["rohmataliwardani@gmail.com"],
+        "report_recipients": [],
+        "weekly_recipients": [],
+        "monthly_recipients": [],
         "timeout_seconds": 20,
         "retries": 3,
         "retry_base_delay_seconds": 2,
@@ -466,6 +469,16 @@ def validate_config(data: Dict[str, Any], user_data: Optional[Dict[str, Any]] = 
         for r in recipients:
             if not isinstance(r, str) or not _EMAIL_RE.match(r):
                 res.errors.append(f"email.recipients contains an invalid address: {r!r}")
+
+    for key in ("report_recipients", "weekly_recipients", "monthly_recipients"):
+        val = email.get(key)
+        if val is not None:
+            if not isinstance(val, list):
+                res.errors.append(f"email.{key} must be a list of email addresses")
+            else:
+                for r in val:
+                    if not isinstance(r, str) or not _EMAIL_RE.match(r):
+                        res.errors.append(f"email.{key} contains an invalid address: {r!r}")
     if email.get("enabled"):
         if not email.get("smtp_host"):
             res.errors.append("email.smtp_host is required when email is enabled")

@@ -95,7 +95,11 @@ def generate_weekly_report(
         hostname = socket.gethostname()
         subject = f"[WEEKLY][{hostname}] Server Health & Security Report - {date_tag}"
         transport = SMTPTransport(ctx)
-        recipients = list(ctx.config.get("email.recipients", ["rohmataliwardani@gmail.com"]))
+        recipients = (
+            list(ctx.config.get("email.weekly_recipients", []))
+            or list(ctx.config.get("email.report_recipients", []))
+            or list(ctx.config.get("email.recipients", ["rohmataliwardani@gmail.com"]))
+        )
         ok, attempts, err = transport.send_email(
             subject=subject,
             html_body=html_content,
