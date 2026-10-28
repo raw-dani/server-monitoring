@@ -121,6 +121,7 @@ def collect(ctx: Context) -> CollectorOutput:
 
         summary_parts = [f"{v['masked_ip']}: {v['connections']} conns" for v in violators]
         summary_str = ", ".join(summary_parts)
+        sample_ip = violators[0]["ip"] if len(violators) == 1 else "TARGET_IP"
 
         out.finding(
             "ddos.conns",
@@ -129,7 +130,7 @@ def collect(ctx: Context) -> CollectorOutput:
             Confidence.HIGH,
             f"Detected {len(violators)} IP(s) conducting concurrent connection flood on web ports",
             f"Active violators: {summary_str}. Total concurrent web connections: {total_web_conns}.",
-            "Drop the attacking IP addresses immediately via iptables: 'iptables -I INPUT -s <IP> -j DROP'. "
+            f"Drop the attacking IP addresses immediately: 'shsm ban {sample_ip} --iptables' or 'iptables -I INPUT -s {sample_ip} -j DROP'. "
             "Ensure OpenLiteSpeed perClientConnLimit is enforced.",
             asset="ports_80_443",
             source=SOURCE,
