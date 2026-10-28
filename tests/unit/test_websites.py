@@ -46,3 +46,69 @@ def test_sync_websites_does_not_serialize_empty_expected_status(test_db):
 
     row2 = test_db.query_one("SELECT expected_status_json FROM websites WHERE domain='test2.com'")
     assert row2["expected_status_json"] == "[200, 301]"
+
+
+def test_cmd_websites_cleanup(test_db):
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+    from click.testing import CliRunner
+    from shsm.cli import cmd_websites_cleanup
+    from shsm.database.repositories.inventory import InventoryRepo
+
+    repo = InventoryRepo(test_db)
+    now = datetime.now(timezone.utc)
+    sites = [
+        {"domain": "gmteknologi.com"},
+        {"domain": "amertajati.co.id-suspended"},
+        {"domain": "mail.adhofficial.com"},
+        {"domain": "broken-site.com"},
+    ]
+    repo.sync_websites(sites, now)
+
+    # Add checks: broken-site.com has ok=0
+    w_id = repo.website_id("broken-site.com")
+    repo.add_website_check(
+        website_id=w_id,
+        now=now,
+        scheme="https",
+        dns_ok=False,
+        dns_addrs="",
+        status_code=None,
+        response_ms=None,
+        chain=[],
+        https_redirect=False,
+        ok=False,
+        error="Name or service not known",
+    )
+
+    # Mock get_context to return test_db
+    mock_ctx = patch("shsm.cli.get_context")
+    with mock_ctx as m_get_ctx:
+        ctx_obj = m_get_ctx.return_value
+        ctx_obj.inventory = repo
+        ctx_obj.db = test_db
+        ctx_obj.now.return_value = now
+
+        runner = CliRunner()
+        # 1. Test Dry Run (detects suspended and mail by default)
+        res_dry = runner.invoke(cmd_websites_cleanup, ["--dry-run"], obj={})
+        assert res_dry.exit_code == 0
+        assert "amertajati.co.id-suspended" in res_dry.output
+        assert "mail.adhofficial.com" in res_dry.output
+        assert "broken-site.com" not in res_dry.output
+        assert "[DRY RUN]" in res_dry.output
+
+        # Verify nothing removed in dry run
+        assert len(repo.active_websites()) == 4
+
+        # 2. Test Execution with --all-junk -y (removes suspended, mail, and failed)
+        res_exec = runner.invoke(cmd_websites_cleanup, ["--all-junk", "-y"], obj={})
+        assert res_exec.exit_code == 0
+        assert "Successfully marked as removed" in res_exec.output
+        assert "Active websites remaining: 1" in res_exec.output
+
+        # Verify only gmteknologi.com is active!
+        active = repo.active_websites()
+        assert len(active) == 1
+        assert active[0]["domain"] == "gmteknologi.com"
+

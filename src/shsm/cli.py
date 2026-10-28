@@ -396,6 +396,117 @@ def cmd_websites_remove(click_ctx: click.Context, domain: str) -> None:
     click.secho(f"[SUCCESS] Website '{domain}' has been removed from active monitoring.", fg="green")
 
 
+@grp_websites.command("cleanup")
+@click.option("--suspended/--no-suspended", "suspended", default=True, help="Remove domains containing '-suspended' (default: True)")
+@click.option("--mail/--no-mail", "mail", default=True, help="Remove mail.* and webmail.* subdomains (default: True)")
+@click.option("--failed", is_flag=True, help="Remove domains whose latest HTTP status is FAILED or has DNS error")
+@click.option("--all-junk", is_flag=True, help="Remove suspended, mail subdomains, AND all FAILED domains in 1 go")
+@click.option("--pattern", default=None, help="Regex pattern of domain names to remove (e.g. '\\.xyz$')")
+@click.option("--purge", is_flag=True, help="Permanently delete from database instead of soft-delete")
+@click.option("--dry-run", is_flag=True, help="Preview domains to be removed without making changes")
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt")
+@click.pass_context
+def cmd_websites_cleanup(
+    click_ctx: click.Context,
+    suspended: bool,
+    mail: bool,
+    failed: bool,
+    all_junk: bool,
+    pattern: Optional[str],
+    purge: bool,
+    dry_run: bool,
+    yes: bool,
+) -> None:
+    """Batch clean up unused, suspended, mail subdomains, or dead websites in 1 command."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    items = app_ctx.inventory.latest_website_status()
+    if not items:
+        click.secho("No active websites registered in inventory.", fg="yellow")
+        return
+
+    if all_junk:
+        suspended = True
+        mail = True
+        failed = True
+
+    import re
+    compiled_pattern = re.compile(pattern, re.IGNORECASE) if pattern else None
+
+    candidates: List[tuple[Dict[str, Any], str]] = []
+    for it in items:
+        dom = it["domain"].lower()
+        reasons = []
+
+        if suspended and ("-suspended" in dom or dom.endswith(".suspended")):
+            reasons.append("suspended vhost")
+        if mail and (dom.startswith("mail.") or dom.startswith("webmail.")):
+            reasons.append("mail/webmail subdomain")
+        if failed:
+            chk = it.get("last_check")
+            if chk:
+                if not chk.get("ok"):
+                    err_msg = chk.get("error") or chk.get("status_code") or "down"
+                    reasons.append(f"check failed ({err_msg})")
+        if compiled_pattern and compiled_pattern.search(dom):
+            reasons.append(f"matched pattern '{pattern}'")
+
+        if reasons:
+            candidates.append((it, ", ".join(reasons)))
+
+    if not candidates:
+        click.secho("No domains matched the cleanup criteria.", fg="green")
+        return
+
+    click.secho(f"=== Websites Cleanup Candidates ({len(candidates)} of {len(items)} websites) ===", bold=True)
+    click.echo(f"{'Domain':<38} {'Reason':<35} {'Latest Status'}")
+    click.echo("-" * 92)
+    for it, reason in candidates:
+        dom = it["domain"]
+        chk = it.get("last_check")
+        if chk:
+            code = chk.get("status_code")
+            st = f"{code} OK" if chk.get("ok") else (f"{code} FAIL" if code else "FAILED")
+            col = "green" if chk.get("ok") else "red"
+        else:
+            st = "Not Checked"
+            col = "yellow"
+        click.echo(f"{dom:<38} {reason:<35} ", nl=False)
+        click.secho(st, fg=col)
+
+    click.echo("-" * 92)
+    click.echo(f"Total to remove: {len(candidates)} | Active remaining: {len(items) - len(candidates)}")
+
+    if dry_run:
+        click.secho("\n[DRY RUN] No changes were made to inventory. Run without --dry-run to execute cleanup.", fg="cyan", bold=True)
+        return
+
+    if not yes:
+        if not click.confirm(f"\nAre you sure you want to remove these {len(candidates)} domain(s)?", default=True):
+            click.secho("Operation cancelled.", fg="yellow")
+            return
+
+    from shsm.core.timeutils import to_iso
+    ts = to_iso(app_ctx.now())
+    ids = [it["id"] for it, _ in candidates]
+
+    with app_ctx.db.transaction():
+        batch_size = 400
+        for i in range(0, len(ids), batch_size):
+            chunk = ids[i : i + batch_size]
+            placeholders = ",".join("?" for _ in chunk)
+            if purge:
+                app_ctx.db.execute(f"DELETE FROM website_checks WHERE website_id IN ({placeholders})", tuple(chunk))
+                app_ctx.db.execute(f"DELETE FROM ssl_certificates WHERE domain IN (SELECT domain FROM websites WHERE id IN ({placeholders}))", tuple(chunk))
+                app_ctx.db.execute(f"DELETE FROM websites WHERE id IN ({placeholders})", tuple(chunk))
+            else:
+                app_ctx.db.execute(f"UPDATE websites SET removed_at=? WHERE id IN ({placeholders})", (ts,) + tuple(chunk))
+
+    action_label = "purged permanently from database" if purge else "marked as removed from active monitoring"
+    click.secho(f"\n[SUCCESS] Successfully {action_label} for {len(candidates)} domain(s).", fg="green", bold=True)
+    click.echo(f"Active websites remaining: {len(items) - len(candidates)}")
+
+
+
 
 # ---------------------------------------------------------------- wordpress
 @main.group("wordpress")

@@ -91,6 +91,28 @@ sudo -u shsm shsm websites check --ssl-only
 sudo -u shsm shsm websites check --no-ssl
 ```
 
+### Melihat dan Membersihkan Website yang Dimonitor
+```bash
+# 1. Menampilkan daftar semua website aktif beserta status HTTP dan sisa SSL
+sudo -u shsm shsm websites list
+
+# 2. Membersihkan domain tidak aktif/junk sekaligus (1 command):
+# Menghapus vhost -suspended dan subdomain mail.* / webmail.*
+sudo -u shsm shsm websites cleanup -y
+
+# Menghapus vhost -suspended, mail.*, dan semua domain yang FAILED (DNS mati/down)
+sudo -u shsm shsm websites cleanup --all-junk -y
+
+# Menghapus secara permanen dari database (purge)
+sudo -u shsm shsm websites cleanup --all-junk --purge -y
+
+# Simulasi preview tanpa menghapus:
+sudo -u shsm shsm websites cleanup --all-junk --dry-run
+
+# 3. Menghapus satu domain tertentu secara manual:
+sudo -u shsm shsm websites remove domain-lama.com
+```
+
 ### Penemuan & Audit WordPress
 Mendeteksi instalasi WordPress serta memeriksa keamanan core, plugin, theme, dan akun administrator:
 ```bash

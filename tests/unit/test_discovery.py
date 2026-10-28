@@ -108,3 +108,24 @@ def test_discover_wordpress_sites_auto_fallback(tmp_path):
         assert len(found) == 1
         assert found[0]["domain"] == "wp-site.com"
         assert found[0]["wp_version"] == "6.4.3"
+
+
+def test_should_ignore_domain_filtering():
+    from shsm.discovery.cyberpanel import should_ignore_domain
+
+    # Suspended domains
+    assert should_ignore_domain("amertajati.co.id-suspended") is True
+    assert should_ignore_domain("aure-studios.com-suspended") is True
+    assert should_ignore_domain("test.suspended") is True
+    assert should_ignore_domain("amertajati.co.id-suspended", ignore_suspended=False) is False
+
+    # Mail subdomains
+    assert should_ignore_domain("mail.amertajati.co.id") is True
+    assert should_ignore_domain("webmail.talentaindonesia.com") is True
+    assert should_ignore_domain("mail.amertajati.co.id", ignore_mail=False) is False
+
+    # Valid domains
+    assert should_ignore_domain("gmteknologi.com") is False
+    assert should_ignore_domain("app.gmteknologi.com") is False
+    assert should_ignore_domain("atonergi.com") is False
+
