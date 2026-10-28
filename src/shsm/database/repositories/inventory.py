@@ -81,6 +81,25 @@ class InventoryRepo:
     def active_websites(self) -> List[Dict[str, Any]]:
         return [dict(r) for r in self.db.query("SELECT * FROM websites WHERE removed_at IS NULL AND enabled=1 ORDER BY domain")]
 
+    def latest_website_status(self) -> List[Dict[str, Any]]:
+        sites = self.active_websites()
+        results = []
+        for s in sites:
+            w_id = s["id"]
+            last_chk = self.db.query_one(
+                "SELECT * FROM website_checks WHERE website_id=? ORDER BY id DESC LIMIT 1",
+                (w_id,)
+            )
+            last_ssl = self.db.query_one(
+                "SELECT * FROM ssl_certificates WHERE domain=? ORDER BY id DESC LIMIT 1",
+                (s["domain"],)
+            )
+            item = dict(s)
+            item["last_check"] = dict(last_chk) if last_chk else None
+            item["last_ssl"] = dict(last_ssl) if last_ssl else None
+            results.append(item)
+        return results
+
     def website_id(self, domain: str) -> Optional[int]:
         row = self.db.query_one("SELECT id FROM websites WHERE domain=?", (domain,))
         return int(row["id"]) if row else None

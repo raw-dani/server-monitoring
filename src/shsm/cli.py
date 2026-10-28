@@ -325,6 +325,78 @@ def cmd_websites_check(click_ctx: click.Context, ssl_only: bool, no_ssl: bool) -
     click.secho(f"Website checks finished ({len(out.checks)} check results).", fg="green" if code == 0 else "yellow")
 
 
+@grp_websites.command("list")
+@click.pass_context
+def cmd_websites_list(click_ctx: click.Context) -> None:
+    """List all registered websites with their latest HTTP and SSL status."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    items = app_ctx.inventory.latest_website_status()
+    if not items:
+        click.secho("No active websites registered in inventory. Run 'shsm websites discover' first.", fg="yellow")
+        return
+
+    click.secho(f"=== Monitored Websites ({len(items)} Active) ===", bold=True)
+    click.echo(f"{'Domain':<28} {'HTTP Status':<14} {'Resp Time':<12} {'SSL Expiry':<18} {'Doc Root'}")
+    click.echo("-" * 95)
+    for it in items:
+        dom = it["domain"]
+        chk = it.get("last_check")
+        ssl_info = it.get("last_ssl")
+
+        if chk:
+            code = chk.get("status_code")
+            is_ok = bool(chk.get("ok"))
+            if is_ok:
+                http_status = f"{code} OK" if code else "OK"
+                http_col = "green"
+            else:
+                http_status = f"{code} FAIL" if code else "FAILED"
+                http_col = "red"
+            ms_val = chk.get("response_ms")
+            resp_str = f"{ms_val:.0f} ms" if ms_val is not None else "-"
+        else:
+            http_status = "Not Checked"
+            http_col = "yellow"
+            resp_str = "-"
+
+        if ssl_info:
+            days = ssl_info.get("days_remaining")
+            if days is not None:
+                days_int = int(days)
+                ssl_str = f"{days_int}d remaining"
+                ssl_col = "green" if days_int > 14 else "yellow" if days_int > 0 else "red"
+            else:
+                ssl_str = "Error"
+                ssl_col = "red"
+        else:
+            ssl_str = "-"
+            ssl_col = "white"
+
+        root = it.get("doc_root") or "-"
+        click.echo(f"{dom:<28} ", nl=False)
+        click.secho(f"{http_status:<14} ", fg=http_col, nl=False)
+        click.echo(f"{resp_str:<12} ", nl=False)
+        click.secho(f"{ssl_str:<18} ", fg=ssl_col, nl=False)
+        click.echo(f"{root}")
+
+
+@grp_websites.command("remove")
+@click.argument("domain")
+@click.pass_context
+def cmd_websites_remove(click_ctx: click.Context, domain: str) -> None:
+    """Remove a website from active monitoring inventory."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.core.timeutils import to_iso
+    ts = to_iso(app_ctx.now())
+    row = app_ctx.db.query_one("SELECT id FROM websites WHERE domain=?", (domain.strip().lower(),))
+    if not row:
+        click.secho(f"Website '{domain}' not found in inventory.", fg="yellow")
+        return
+    app_ctx.db.execute("UPDATE websites SET removed_at=? WHERE id=?", (ts, row["id"]))
+    click.secho(f"[SUCCESS] Website '{domain}' has been removed from active monitoring.", fg="green")
+
+
+
 # ---------------------------------------------------------------- wordpress
 @main.group("wordpress")
 def grp_wordpress() -> None:
@@ -886,6 +958,8 @@ def cmd_block_scanners(click_ctx: click.Context, threshold: int, log_file: Optio
         for line in fh:
             m = _ACCESS_LOG_LINE.search(line)
             if m and m.group("status") == "404":
+                if "SHSM-Monitor" in line:
+                    continue
                 ip = m.group("ip")
                 if ip:
                     total_404s += 1

@@ -40,30 +40,31 @@ def _check_http(
     url = f"{scheme}://{domain}/"
     headers = {"User-Agent": user_agent}
     start = time.monotonic()
+    connect_timeout = min(timeout, 4.0)
     try:
-        session = requests.Session()
-        session.max_redirects = max_redirects
-        resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=False)
-        duration_ms = (time.monotonic() - start) * 1000.0
+        with requests.Session() as session:
+            session.max_redirects = max_redirects
+            resp = session.get(url, headers=headers, timeout=(connect_timeout, timeout), allow_redirects=True, verify=False)
+            duration_ms = (time.monotonic() - start) * 1000.0
 
-        chain = [r.url for r in resp.history] + [resp.url]
-        code = resp.status_code
+            chain = [r.url for r in resp.history] + [resp.url]
+            code = resp.status_code
 
-        # Check HTTPS redirect behavior
-        https_redirect = False
-        if scheme == "http" and resp.history:
-            https_redirect = any(u.startswith("https://") for u in chain)
+            # Check HTTPS redirect behavior
+            https_redirect = False
+            if scheme == "http" and resp.history:
+                https_redirect = any(u.startswith("https://") for u in chain)
 
-        is_ok = code in expected_statuses
+            is_ok = code in expected_statuses
 
-        return {
-            "ok": is_ok,
-            "status_code": code,
-            "response_ms": duration_ms,
-            "chain": chain,
-            "https_redirect": https_redirect,
-            "error": None if is_ok else f"Unexpected status code {code} (expected {expected_statuses})",
-        }
+            return {
+                "ok": is_ok,
+                "status_code": code,
+                "response_ms": duration_ms,
+                "chain": chain,
+                "https_redirect": https_redirect,
+                "error": None if is_ok else f"Unexpected status code {code} (expected {expected_statuses})",
+            }
     except requests.exceptions.Timeout:
         duration_ms = (time.monotonic() - start) * 1000.0
         return {

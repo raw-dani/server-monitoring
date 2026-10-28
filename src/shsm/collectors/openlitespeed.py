@@ -91,7 +91,8 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
                 status_counts["4xx"] += 1
                 c_4xx += 1
                 if code == "404" and ip:
-                    ip_404_counts[ip] = ip_404_counts.get(ip, 0) + 1
+                    if "SHSM-Monitor" not in line:
+                        ip_404_counts[ip] = ip_404_counts.get(ip, 0) + 1
             elif first_c == "5":
                 status_counts["5xx"] += 1
                 c_5xx += 1
