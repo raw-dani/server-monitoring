@@ -146,6 +146,12 @@ sudo -u shsm shsm ban <IP_ADDRESS> --iptables
 
 # 4. Buka blokir IP terpusat (otomatis membersihkan dari Fail2Ban DAN iptables sekaligus):
 sudo -u shsm shsm unban <IP_ADDRESS>
+
+# 5. Pindai dan blokir masif semua IP scanner 404 (default ambang batas >= 30 error 404):
+# Simulasi:
+sudo -u shsm shsm block-scanners --threshold 30 --dry-run
+# Eksekusi blokir via iptables:
+sudo -u shsm shsm block-scanners --threshold 30
 ```
 
 ### Audit Reputasi IP Server pada DNSBL / RBL (Anti-Spam Blacklist)

@@ -397,26 +397,20 @@ sudo -u shsm shsm doctor
      > ```
      > Dan pastikan IP tersebut didaftarkan pada `ip_whitelist` di `/etc/shsm/config.yaml`.
 
-  3. **Cara Cek IP 404 Terbanyak yang BELUM Diblokir (Unblocked Attackers)**:
-     Untuk menyaring log OpenLiteSpeed secara otomatis dan hanya menampilkan IP pembuat error 404 yang saat ini **belum ada** di daftar blokir `iptables`:
+  3. **Cara Blokir Otomatis IP 404 Terbanyak Menggunakan SHSM**:
+     SHSM memiliki fitur pemindaian log akses dan auto-drop iptables terpusat:
      ```bash
-     # Ambil IP yang sudah diblokir saat ini
-     BLOCKED_IPS=$(sudo iptables -L INPUT -n | grep DROP | awk '{print $4}' | grep -v "0.0.0.0/0" | tr '\n' '|')
+     # Mode simulasi (melihat IP mana saja yang akan diblokir tanpa mengeksekusi):
+     sudo -u shsm shsm block-scanners --threshold 30 --dry-run
 
-     # Filter 10 IP teratas penghasil 404 yang BELUM diblokir
-     for ip in $(awk '$9 == "404" {print $1}' /usr/local/lsws/logs/access.log | grep -Ev "127.0.0.1|^::1" | sort | uniq -c | sort -nr | head -n 10 | awk '{print $2}'); do
-         rule=$(sudo iptables -L INPUT -n -v | grep -w "$ip")
-         if [ -n "$rule" ]; then
-            echo -e "[BLOCKED in iptables] $ip -> $rule"
-         else
-            echo -e "[NOT BLOCKED - Masih Lolos] $ip"
-         fi
-     done
-
+     # Eksekusi blokir instan via iptables DROP untuk semua IP luar dengan 404 >= 30:
+     sudo -u shsm shsm block-scanners --threshold 30
      ```
-     *Jika ingin memblokir IP baru tersebut secara manual sekaligus:*
+     *SHSM secara cerdas mengecualikan IP server Anda sendiri dan loopback (`127.0.0.1`), sehingga aman dijalankan.*
+
+     Atau jika ingin mengecek status manual perbandingan dengan iptables:
      ```bash
-     sudo iptables -I INPUT -s <IP_YANG_MUNCUL> -j DROP
+     grep " 404 " /usr/local/lsws/logs/access.log | awk '{print $1}' | sort | uniq -c | sort -nr | head -n 20
      ```
 
   4. **Matikan `xmlrpc.php` di Seluruh Domain**:

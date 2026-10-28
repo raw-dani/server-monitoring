@@ -848,5 +848,79 @@ def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
         click.secho(f"[WARNING] No active bans found or unban could not be confirmed for {ip}.", fg="yellow")
 
 
+@main.command("block-scanners")
+@click.option("--threshold", default=30, type=int, help="Minimum 404 count to trigger ban (default: 30)")
+@click.option("--log-file", default=None, help="Path to access.log (default: from config)")
+@click.option("--dry-run", is_flag=True, help="Only show IPs that would be banned without executing ban")
+@click.pass_context
+def cmd_block_scanners(click_ctx: click.Context, threshold: int, log_file: Optional[str], dry_run: bool) -> None:
+    """Scan web server access log, aggregate 404 counts per IP, and ban abusive scanner IPs in iptables."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
+    from shsm.security import blocked
+    from shsm.collectors.openlitespeed import _ACCESS_LOG_LINE
+
+    log_path = log_file or str(app_ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
+    if not os.path.isfile(log_path):
+        click.secho(f"[ERROR] Access log file not found at {log_path}", fg="red")
+        sys.exit(1)
+
+    click.echo(f"Scanning {log_path} for IPs with >= {threshold} 404 errors...")
+
+    # Whitelist and local system IPs protection
+    whitelist = set(app_ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
+    cfg_ip = app_ctx.config.get("security.server_public_ip")
+    if cfg_ip:
+        whitelist.add(str(cfg_ip).strip())
+    try:
+        import socket
+        hostname = socket.gethostname()
+        for host_ip in socket.gethostbyname_ex(hostname)[2]:
+            whitelist.add(host_ip)
+    except Exception:
+        pass
+
+    ip_counts: Dict[str, int] = {}
+    total_404s = 0
+    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = _ACCESS_LOG_LINE.search(line)
+            if m and m.group("status") == "404":
+                ip = m.group("ip")
+                if ip:
+                    total_404s += 1
+                    ip_counts[ip] = ip_counts.get(ip, 0) + 1
+
+    targets = [
+        (ip, cnt) for ip, cnt in ip_counts.items()
+        if cnt >= threshold and ip not in whitelist and not ip.startswith("127.")
+    ]
+    targets.sort(key=lambda x: x[1], reverse=True)
+
+    click.echo(f"Total 404 requests in log: {total_404s}. Found {len(targets)} external IP(s) exceeding threshold ({threshold}).")
+    if not targets:
+        click.secho("No external scanner IPs exceeded the threshold.", fg="green")
+        return
+
+    click.echo(f"\n{'IP Address':<20} {'404 Hits':<10} {'Action / Status'}")
+    click.echo("-" * 65)
+
+    banned_count = 0
+    for ip, cnt in targets:
+        if dry_run:
+            click.echo(f"{ip:<20} {cnt:<10} [DRY-RUN] Would be blocked via iptables DROP")
+        else:
+            ok, msg = blocked.ban_ip_unified(app_ctx, ip, use_iptables=True)
+            if ok:
+                banned_count += 1
+                click.secho(f"{ip:<20} {cnt:<10} [BANNED] {msg}", fg="green")
+            else:
+                click.secho(f"{ip:<20} {cnt:<10} [FAILED] {msg}", fg="yellow")
+
+    if dry_run:
+        click.secho(f"\nDry-run completed. {len(targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
+    else:
+        click.secho(f"\nSuccessfully processed {len(targets)} IP(s) ({banned_count} newly blocked in iptables).", fg="green", bold=True)
+
+
 if __name__ == "__main__":
     main()

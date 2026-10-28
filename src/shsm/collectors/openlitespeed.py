@@ -249,10 +249,22 @@ def collect(ctx: Context) -> CollectorOutput:
 
         # 404 Flood / Botnet Scanner Detection & Auto-Blocking
         ip_404_counts = acc_info.get("ip_404_counts", {})
-        thresh_404 = int(ctx.config.get("security.scanner_404_threshold", 50))
+        thresh_404 = int(ctx.config.get("security.scanner_404_threshold", 30))
         auto_block_404 = bool(ctx.config.get("security.scanner_404_auto_block", True))
         target_jail = str(ctx.config.get("security.fail2ban_block_jail", "auto"))
         whitelist = set(ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
+
+        # Automatically protect server's own public IP and local hostname IPs
+        cfg_ip = ctx.config.get("security.server_public_ip")
+        if cfg_ip:
+            whitelist.add(str(cfg_ip).strip())
+        try:
+            import socket
+            hostname = socket.gethostname()
+            for host_ip in socket.gethostbyname_ex(hostname)[2]:
+                whitelist.add(host_ip)
+        except Exception:
+            pass
 
         abusive_404_ips = {
             ip: cnt for ip, cnt in ip_404_counts.items()

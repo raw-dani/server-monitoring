@@ -284,7 +284,7 @@ DEFAULTS: Dict[str, Any] = {
         "fail2ban_auto_block": True,
         "fail2ban_block_jail": "auto",  # 'auto' or specific jail name like 'ols-scanner'
         "scanner_404_auto_block": True,
-        "scanner_404_threshold": 50,    # Max 404 errors per run from single IP before auto-ban
+        "scanner_404_threshold": 30,    # Max 404 errors per run from single IP before auto-ban
         "ip_whitelist": ["127.0.0.1", "::1"],
         "server_public_ip": "",
         "rbl_providers": [

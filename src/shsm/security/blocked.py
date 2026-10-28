@@ -196,8 +196,19 @@ def ban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None, use_iptabl
 
     # Protect loopback and whitelist
     whitelist = set(ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
-    if clean_ip in whitelist:
-        return False, f"IP {clean_ip} is in whitelist; refusing to ban"
+    cfg_ip = ctx.config.get("security.server_public_ip")
+    if cfg_ip:
+        whitelist.add(str(cfg_ip).strip())
+    try:
+        import socket
+        hostname = socket.gethostname()
+        for host_ip in socket.gethostbyname_ex(hostname)[2]:
+            whitelist.add(host_ip)
+    except Exception:
+        pass
+
+    if clean_ip in whitelist or clean_ip.startswith("127."):
+        return False, f"IP {clean_ip} is in whitelist or is server loopback; refusing to ban"
 
     if use_iptables:
         ipt_bin = ctx.runner.which("iptables") or ctx.runner.which("/sbin/iptables") or ctx.runner.which("/usr/sbin/iptables")
