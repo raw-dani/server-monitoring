@@ -118,3 +118,27 @@ def test_unban_ip_unified():
     assert ok is True
     assert any("Fail2Ban" in m for m in msgs)
     assert any("iptables" in m for m in msgs)
+
+
+def test_cmd_block_scanners(tmp_path):
+    from click.testing import CliRunner
+    from shsm.cli import cmd_block_scanners
+
+    log_file = tmp_path / "access.log"
+    lines = []
+    for _ in range(35):
+        lines.append('34.81.106.122 - - [28/Oct/2026:10:00:00 +0700] "GET /app HTTP/1.1" 404 1234')
+    for _ in range(10):
+        lines.append('45.148.10.80 - - [28/Oct/2026:10:00:00 +0700] "GET /.env HTTP/1.1" 404 1234')
+    for _ in range(40):
+        lines.append('127.0.0.1 - - [28/Oct/2026:10:00:00 +0700] "GET /test HTTP/1.1" 404 1234')
+    log_file.write_text("\n".join(lines), encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cmd_block_scanners, ["--log-file", str(log_file), "--threshold", "30", "--dry-run"], obj={})
+    assert result.exit_code == 0
+    assert "Found 1 external IP(s) exceeding threshold" in result.output
+    assert "34.81.106.122" in result.output
+    assert "[DRY-RUN]" in result.output
+    assert "127.0.0.1" not in result.output
+

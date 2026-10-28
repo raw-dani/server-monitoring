@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import re
 from typing import Any, Dict, List
-
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus, CollectorOutput, Confidence, Severity
@@ -37,6 +39,11 @@ def collect_process_metrics(ctx: Context, out: CollectorOutput) -> None:
     proc_names = tuple(p.lower() for p in ctx.config.get("openlitespeed.process_names", ["openlitespeed", "lshttpd", "litespeed", "lsphp"]))
     matched_count = 0
     total_rss = 0
+    if psutil is None:
+        out.metric("openlitespeed.process_count", 0)
+        out.metric("openlitespeed.memory_bytes", 0)
+        out.metric("openlitespeed.cpu_percent", 0.0)
+        return
 
     # Under high attack load, thousands of short-lived lsphp processes spawn/die.
     # We iterate conservatively and limit total inspected to prevent CPU burn.
