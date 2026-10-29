@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 import re
 from typing import Any, Dict, List
-
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus, CollectorOutput, Confidence, Severity
@@ -37,6 +39,11 @@ def collect_process_metrics(ctx: Context, out: CollectorOutput) -> None:
     proc_names = tuple(p.lower() for p in ctx.config.get("openlitespeed.process_names", ["openlitespeed", "lshttpd", "litespeed", "lsphp"]))
     matched_count = 0
     total_rss = 0
+    if psutil is None:
+        out.metric("openlitespeed.process_count", 0)
+        out.metric("openlitespeed.memory_bytes", 0)
+        out.metric("openlitespeed.cpu_percent", 0.0)
+        return
 
     # Under high attack load, thousands of short-lived lsphp processes spawn/die.
     # We iterate conservatively and limit total inspected to prevent CPU burn.
@@ -84,7 +91,8 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
                 status_counts["4xx"] += 1
                 c_4xx += 1
                 if code == "404" and ip:
-                    ip_404_counts[ip] = ip_404_counts.get(ip, 0) + 1
+                    if "SHSM-Monitor" not in line:
+                        ip_404_counts[ip] = ip_404_counts.get(ip, 0) + 1
             elif first_c == "5":
                 status_counts["5xx"] += 1
                 c_5xx += 1
@@ -249,10 +257,22 @@ def collect(ctx: Context) -> CollectorOutput:
 
         # 404 Flood / Botnet Scanner Detection & Auto-Blocking
         ip_404_counts = acc_info.get("ip_404_counts", {})
-        thresh_404 = int(ctx.config.get("security.scanner_404_threshold", 50))
+        thresh_404 = int(ctx.config.get("security.scanner_404_threshold", 30))
         auto_block_404 = bool(ctx.config.get("security.scanner_404_auto_block", True))
         target_jail = str(ctx.config.get("security.fail2ban_block_jail", "auto"))
         whitelist = set(ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
+
+        # Automatically protect server's own public IP and local hostname IPs
+        cfg_ip = ctx.config.get("security.server_public_ip")
+        if cfg_ip:
+            whitelist.add(str(cfg_ip).strip())
+        try:
+            import socket
+            hostname = socket.gethostname()
+            for host_ip in socket.gethostbyname_ex(hostname)[2]:
+                whitelist.add(host_ip)
+        except Exception:
+            pass
 
         abusive_404_ips = {
             ip: cnt for ip, cnt in ip_404_counts.items()

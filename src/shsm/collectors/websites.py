@@ -45,14 +45,15 @@ def _check_http(
         "Accept-Language": "en-US,en;q=0.5",
     }
     start = time.monotonic()
+    connect_timeout = min(timeout, 4.0)
     last_err_type = "unknown"
     last_err_msg = ""
 
     for attempt in range(retries + 1):
         try:
-            session = requests.Session()
-            session.max_redirects = max_redirects
-            resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=False)
+            with requests.Session() as session:
+                session.max_redirects = max_redirects
+                resp = session.get(url, headers=headers, timeout=(connect_timeout, timeout), allow_redirects=True, verify=False)
             duration_ms = (time.monotonic() - start) * 1000.0
 
             chain = [r.url for r in resp.history] + [resp.url]
@@ -79,7 +80,6 @@ def _check_http(
             last_err_msg = f"Connection timed out after {timeout}s"
             continue
         except requests.exceptions.SSLError as exc:
-            # Check if this SSLError is actually a handshake timeout
             err_text = str(exc).lower()
             if "timed out" in err_text or "timeout" in err_text:
                 last_err_type = "timeout"

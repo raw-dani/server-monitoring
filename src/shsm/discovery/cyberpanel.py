@@ -14,7 +14,25 @@ from shsm.utils.paths import is_valid_domain, normalize_domain
 log = logging.getLogger(__name__)
 
 
-def discover_from_cyberpanel_mariadb(ctx: Context) -> List[Dict[str, Any]]:
+def should_ignore_domain(
+    domain: str,
+    ignore_suspended: bool = True,
+    ignore_mail: bool = True,
+) -> bool:
+    """Determine whether a domain is a suspended alias or mail helper domain that should not be monitored as a website."""
+    dom = domain.lower().strip()
+    if ignore_suspended and ("-suspended" in dom or dom.endswith(".suspended")):
+        return True
+    if ignore_mail and (dom.startswith("mail.") or dom.startswith("webmail.")):
+        return True
+    return False
+
+
+def discover_from_cyberpanel_mariadb(
+    ctx: Context,
+    ignore_suspended: bool = True,
+    ignore_mail: bool = True,
+) -> List[Dict[str, Any]]:
     """Query CyberPanel MariaDB database (authoritative source for CyberPanel sites)."""
     from shsm.collectors.mariadb import run_query
 
@@ -33,7 +51,7 @@ def discover_from_cyberpanel_mariadb(ctx: Context) -> List[Dict[str, Any]]:
             parts = line.split("\t")
             raw_dom = parts[0].strip()
             dom = normalize_domain(raw_dom)
-            if not dom:
+            if not dom or should_ignore_domain(dom, ignore_suspended, ignore_mail):
                 continue
 
             admin_email = parts[1].strip() if len(parts) > 1 else ""
@@ -76,7 +94,7 @@ def discover_from_cyberpanel_mariadb(ctx: Context) -> List[Dict[str, Any]]:
                 continue
             parts = line.split("\t")
             sub_dom = normalize_domain(parts[0].strip())
-            if not sub_dom or sub_dom in existing:
+            if not sub_dom or sub_dom in existing or should_ignore_domain(sub_dom, ignore_suspended, ignore_mail):
                 continue
             sub_path = parts[1].strip() if len(parts) > 1 else ""
             doc_root = sub_path if (sub_path and sub_path.startswith("/")) else f"/home/{sub_dom}/public_html"
@@ -104,7 +122,11 @@ def discover_from_cyberpanel_mariadb(ctx: Context) -> List[Dict[str, Any]]:
     return results
 
 
-def discover_from_cyberpanel_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
+def discover_from_cyberpanel_db(
+    db_path: Optional[str] = None,
+    ignore_suspended: bool = True,
+    ignore_mail: bool = True,
+) -> List[Dict[str, Any]]:
     """Query CyberPanel internal SQLite database if it exists."""
     candidate_paths = [db_path] if db_path else [
         "/usr/local/CyberCP/CyberCP/db.sqlite3",
@@ -138,7 +160,7 @@ def discover_from_cyberpanel_db(db_path: Optional[str] = None) -> List[Dict[str,
             for r in rows:
                 col_keys = r.keys()
                 domain = r["domain"] if "domain" in col_keys else None
-                if not domain or not is_valid_domain(domain):
+                if not domain or not is_valid_domain(domain) or should_ignore_domain(domain, ignore_suspended, ignore_mail):
                     continue
 
                 owner = r["adminEmail"] if "adminEmail" in col_keys else "nobody"
@@ -165,6 +187,8 @@ def discover_from_cyberpanel_db(db_path: Optional[str] = None) -> List[Dict[str,
 def discover_from_lsws_conf(
     vhost_dir: str = "/usr/local/lsws/conf/vhosts",
     httpd_conf: str = "/usr/local/lsws/conf/httpd_config.conf",
+    ignore_suspended: bool = True,
+    ignore_mail: bool = True,
 ) -> List[Dict[str, Any]]:
     """Discover websites from OpenLiteSpeed configuration (httpd_config.conf and vhosts dir)."""
     results: List[Dict[str, Any]] = []
@@ -181,7 +205,7 @@ def discover_from_lsws_conf(
                 vh_name = m.group(1).strip()
                 block = m.group(2)
                 dom = normalize_domain(vh_name)
-                if not dom or dom.lower() in ("example", "localhost", "default"):
+                if not dom or dom.lower() in ("example", "localhost", "default") or should_ignore_domain(dom, ignore_suspended, ignore_mail):
                     continue
 
                 vh_root = None
@@ -194,6 +218,7 @@ def discover_from_lsws_conf(
                             break
 
                 if vh_root:
+                    vh_root = vh_root.replace("$VH_NAME", dom).replace("$VH_DOMAIN", dom)
                     if vh_root.endswith("/"):
                         vh_root = vh_root.rstrip("/")
                     doc_root = f"{vh_root}/public_html" if not vh_root.endswith("public_html") else vh_root
@@ -240,7 +265,7 @@ def discover_from_lsws_conf(
                     continue
 
                 domain = normalize_domain(entry.name)
-                if not domain or domain in seen_domains:
+                if not domain or domain in seen_domains or should_ignore_domain(domain, ignore_suspended, ignore_mail):
                     continue
 
                 conf_path = os.path.join(entry.path, "vhost.conf")
@@ -253,7 +278,7 @@ def discover_from_lsws_conf(
                                 if line.startswith("docRoot"):
                                     parts = line.split(None, 1)
                                     if len(parts) == 2:
-                                        doc_root = parts[1].replace("$VH_ROOT", "").strip()
+                                        doc_root = parts[1].replace("$VH_ROOT", "").replace("$VH_NAME", domain).replace("$VH_DOMAIN", domain).strip()
                                         if not doc_root.startswith("/"):
                                             doc_root = os.path.join("/home", domain, doc_root)
                     except OSError:
@@ -289,7 +314,11 @@ def discover_from_lsws_conf(
     return results
 
 
-def discover_from_home_directories(home_base: str = "/home") -> List[Dict[str, Any]]:
+def discover_from_home_directories(
+    home_base: str = "/home",
+    ignore_suspended: bool = True,
+    ignore_mail: bool = True,
+) -> List[Dict[str, Any]]:
     """Fallback: scan /home/*/public_html with resilient error handling."""
     if not os.path.isdir(home_base):
         return []
@@ -310,7 +339,7 @@ def discover_from_home_directories(home_base: str = "/home") -> List[Dict[str, A
                 continue
 
             domain = normalize_domain(name)
-            if not domain:
+            if not domain or should_ignore_domain(domain, ignore_suspended, ignore_mail):
                 continue
 
             pub_html = os.path.join(entry_path, "public_html")
@@ -349,12 +378,15 @@ def discover_websites(ctx: Context) -> List[Dict[str, Any]]:
     """Aggregate websites from CyberPanel MariaDB, SQLite, OpenLiteSpeed config, and /home."""
     discovered: Dict[str, Dict[str, Any]] = {}
 
+    ignore_suspended = not ctx.config.get("websites.include_suspended", False)
+    ignore_mail = not ctx.config.get("websites.include_mail_subdomains", False)
+
     # 1. Authoritative: CyberPanel MariaDB
-    for site in discover_from_cyberpanel_mariadb(ctx):
+    for site in discover_from_cyberpanel_mariadb(ctx, ignore_suspended=ignore_suspended, ignore_mail=ignore_mail):
         discovered[site["domain"]] = site
 
     # 2. CyberPanel SQLite database fallback
-    for site in discover_from_cyberpanel_db():
+    for site in discover_from_cyberpanel_db(ignore_suspended=ignore_suspended, ignore_mail=ignore_mail):
         dom = site["domain"]
         if dom not in discovered:
             discovered[dom] = site
@@ -362,7 +394,7 @@ def discover_websites(ctx: Context) -> List[Dict[str, Any]]:
     # 3. OpenLiteSpeed config (httpd_config.conf and vhosts)
     vhost_dir = str(ctx.config.get("openlitespeed.vhost_conf_dir", "/usr/local/lsws/conf/vhosts"))
     httpd_conf = str(ctx.config.get("openlitespeed.httpd_conf", "/usr/local/lsws/conf/httpd_config.conf"))
-    for site in discover_from_lsws_conf(vhost_dir, httpd_conf):
+    for site in discover_from_lsws_conf(vhost_dir, httpd_conf, ignore_suspended=ignore_suspended, ignore_mail=ignore_mail):
         dom = site["domain"]
         if dom not in discovered:
             discovered[dom] = site
@@ -372,7 +404,7 @@ def discover_websites(ctx: Context) -> List[Dict[str, Any]]:
 
     # 4. Fallback scan /home
     if ctx.config.get("websites.fallback_scan_home", True):
-        for site in discover_from_home_directories():
+        for site in discover_from_home_directories(ignore_suspended=ignore_suspended, ignore_mail=ignore_mail):
             dom = site["domain"]
             if dom not in discovered:
                 discovered[dom] = site
@@ -405,4 +437,5 @@ def discover_websites(ctx: Context) -> List[Dict[str, Any]]:
     excludes = set(ctx.config.get("websites.exclude", []))
     final_sites = [s for s in discovered.values() if s["domain"] not in excludes]
     return sorted(final_sites, key=lambda s: s["domain"])
+
 

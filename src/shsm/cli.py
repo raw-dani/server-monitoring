@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import click
 import yaml
@@ -322,6 +323,189 @@ def cmd_websites_check(click_ctx: click.Context, ssl_only: bool, no_ssl: bool) -
     job_name = "websites-ssl" if ssl_only else "websites-check"
     code, out = engine.run_job(job_name, _do)
     click.secho(f"Website checks finished ({len(out.checks)} check results).", fg="green" if code == 0 else "yellow")
+
+
+@grp_websites.command("list")
+@click.pass_context
+def cmd_websites_list(click_ctx: click.Context) -> None:
+    """List all registered websites with their latest HTTP and SSL status."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    items = app_ctx.inventory.latest_website_status()
+    if not items:
+        click.secho("No active websites registered in inventory. Run 'shsm websites discover' first.", fg="yellow")
+        return
+
+    click.secho(f"=== Monitored Websites ({len(items)} Active) ===", bold=True)
+    click.echo(f"{'Domain':<28} {'HTTP Status':<14} {'Resp Time':<12} {'SSL Expiry':<18} {'Doc Root'}")
+    click.echo("-" * 95)
+    for it in items:
+        dom = it["domain"]
+        chk = it.get("last_check")
+        ssl_info = it.get("last_ssl")
+
+        if chk:
+            code = chk.get("status_code")
+            is_ok = bool(chk.get("ok"))
+            if is_ok:
+                http_status = f"{code} OK" if code else "OK"
+                http_col = "green"
+            else:
+                http_status = f"{code} FAIL" if code else "FAILED"
+                http_col = "red"
+            ms_val = chk.get("response_ms")
+            resp_str = f"{ms_val:.0f} ms" if ms_val is not None else "-"
+        else:
+            http_status = "Not Checked"
+            http_col = "yellow"
+            resp_str = "-"
+
+        if ssl_info:
+            days = ssl_info.get("days_remaining")
+            if days is not None:
+                days_int = int(days)
+                ssl_str = f"{days_int}d remaining"
+                ssl_col = "green" if days_int > 14 else "yellow" if days_int > 0 else "red"
+            else:
+                ssl_str = "Error"
+                ssl_col = "red"
+        else:
+            ssl_str = "-"
+            ssl_col = "white"
+
+        root = it.get("doc_root") or "-"
+        click.echo(f"{dom:<28} ", nl=False)
+        click.secho(f"{http_status:<14} ", fg=http_col, nl=False)
+        click.echo(f"{resp_str:<12} ", nl=False)
+        click.secho(f"{ssl_str:<18} ", fg=ssl_col, nl=False)
+        click.echo(f"{root}")
+
+
+@grp_websites.command("remove")
+@click.argument("domain")
+@click.pass_context
+def cmd_websites_remove(click_ctx: click.Context, domain: str) -> None:
+    """Remove a website from active monitoring inventory."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.core.timeutils import to_iso
+    ts = to_iso(app_ctx.now())
+    row = app_ctx.db.query_one("SELECT id FROM websites WHERE domain=?", (domain.strip().lower(),))
+    if not row:
+        click.secho(f"Website '{domain}' not found in inventory.", fg="yellow")
+        return
+    app_ctx.db.execute("UPDATE websites SET removed_at=? WHERE id=?", (ts, row["id"]))
+    click.secho(f"[SUCCESS] Website '{domain}' has been removed from active monitoring.", fg="green")
+
+
+@grp_websites.command("cleanup")
+@click.option("--suspended/--no-suspended", "suspended", default=True, help="Remove domains containing '-suspended' (default: True)")
+@click.option("--mail/--no-mail", "mail", default=True, help="Remove mail.* and webmail.* subdomains (default: True)")
+@click.option("--failed", is_flag=True, help="Remove domains whose latest HTTP status is FAILED or has DNS error")
+@click.option("--all-junk", is_flag=True, help="Remove suspended, mail subdomains, AND all FAILED domains in 1 go")
+@click.option("--pattern", default=None, help="Regex pattern of domain names to remove (e.g. '\\.xyz$')")
+@click.option("--purge", is_flag=True, help="Permanently delete from database instead of soft-delete")
+@click.option("--dry-run", is_flag=True, help="Preview domains to be removed without making changes")
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt")
+@click.pass_context
+def cmd_websites_cleanup(
+    click_ctx: click.Context,
+    suspended: bool,
+    mail: bool,
+    failed: bool,
+    all_junk: bool,
+    pattern: Optional[str],
+    purge: bool,
+    dry_run: bool,
+    yes: bool,
+) -> None:
+    """Batch clean up unused, suspended, mail subdomains, or dead websites in 1 command."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    items = app_ctx.inventory.latest_website_status()
+    if not items:
+        click.secho("No active websites registered in inventory.", fg="yellow")
+        return
+
+    if all_junk:
+        suspended = True
+        mail = True
+        failed = True
+
+    import re
+    compiled_pattern = re.compile(pattern, re.IGNORECASE) if pattern else None
+
+    candidates: List[tuple[Dict[str, Any], str]] = []
+    for it in items:
+        dom = it["domain"].lower()
+        reasons = []
+
+        if suspended and ("-suspended" in dom or dom.endswith(".suspended")):
+            reasons.append("suspended vhost")
+        if mail and (dom.startswith("mail.") or dom.startswith("webmail.")):
+            reasons.append("mail/webmail subdomain")
+        if failed:
+            chk = it.get("last_check")
+            if chk:
+                if not chk.get("ok"):
+                    err_msg = chk.get("error") or chk.get("status_code") or "down"
+                    reasons.append(f"check failed ({err_msg})")
+        if compiled_pattern and compiled_pattern.search(dom):
+            reasons.append(f"matched pattern '{pattern}'")
+
+        if reasons:
+            candidates.append((it, ", ".join(reasons)))
+
+    if not candidates:
+        click.secho("No domains matched the cleanup criteria.", fg="green")
+        return
+
+    click.secho(f"=== Websites Cleanup Candidates ({len(candidates)} of {len(items)} websites) ===", bold=True)
+    click.echo(f"{'Domain':<38} {'Reason':<35} {'Latest Status'}")
+    click.echo("-" * 92)
+    for it, reason in candidates:
+        dom = it["domain"]
+        chk = it.get("last_check")
+        if chk:
+            code = chk.get("status_code")
+            st = f"{code} OK" if chk.get("ok") else (f"{code} FAIL" if code else "FAILED")
+            col = "green" if chk.get("ok") else "red"
+        else:
+            st = "Not Checked"
+            col = "yellow"
+        click.echo(f"{dom:<38} {reason:<35} ", nl=False)
+        click.secho(st, fg=col)
+
+    click.echo("-" * 92)
+    click.echo(f"Total to remove: {len(candidates)} | Active remaining: {len(items) - len(candidates)}")
+
+    if dry_run:
+        click.secho("\n[DRY RUN] No changes were made to inventory. Run without --dry-run to execute cleanup.", fg="cyan", bold=True)
+        return
+
+    if not yes:
+        if not click.confirm(f"\nAre you sure you want to remove these {len(candidates)} domain(s)?", default=True):
+            click.secho("Operation cancelled.", fg="yellow")
+            return
+
+    from shsm.core.timeutils import to_iso
+    ts = to_iso(app_ctx.now())
+    ids = [it["id"] for it, _ in candidates]
+
+    with app_ctx.db.transaction():
+        batch_size = 400
+        for i in range(0, len(ids), batch_size):
+            chunk = ids[i : i + batch_size]
+            placeholders = ",".join("?" for _ in chunk)
+            if purge:
+                app_ctx.db.execute(f"DELETE FROM website_checks WHERE website_id IN ({placeholders})", tuple(chunk))
+                app_ctx.db.execute(f"DELETE FROM ssl_certificates WHERE domain IN (SELECT domain FROM websites WHERE id IN ({placeholders}))", tuple(chunk))
+                app_ctx.db.execute(f"DELETE FROM websites WHERE id IN ({placeholders})", tuple(chunk))
+            else:
+                app_ctx.db.execute(f"UPDATE websites SET removed_at=? WHERE id IN ({placeholders})", (ts,) + tuple(chunk))
+
+    action_label = "purged permanently from database" if purge else "marked as removed from active monitoring"
+    click.secho(f"\n[SUCCESS] Successfully {action_label} for {len(candidates)} domain(s).", fg="green", bold=True)
+    click.echo(f"Active websites remaining: {len(items) - len(candidates)}")
+
+
 
 
 # ---------------------------------------------------------------- wordpress
@@ -846,6 +1030,82 @@ def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
 
     if not ok:
         click.secho(f"[WARNING] No active bans found or unban could not be confirmed for {ip}.", fg="yellow")
+
+
+@main.command("block-scanners")
+@click.option("--threshold", default=30, type=int, help="Minimum 404 count to trigger ban (default: 30)")
+@click.option("--log-file", default=None, help="Path to access.log (default: from config)")
+@click.option("--dry-run", is_flag=True, help="Only show IPs that would be banned without executing ban")
+@click.pass_context
+def cmd_block_scanners(click_ctx: click.Context, threshold: int, log_file: Optional[str], dry_run: bool) -> None:
+    """Scan web server access log, aggregate 404 counts per IP, and ban abusive scanner IPs in iptables."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
+    from shsm.security import blocked
+    from shsm.collectors.openlitespeed import _ACCESS_LOG_LINE
+
+    log_path = log_file or str(app_ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
+    if not os.path.isfile(log_path):
+        click.secho(f"[ERROR] Access log file not found at {log_path}", fg="red")
+        sys.exit(1)
+
+    click.echo(f"Scanning {log_path} for IPs with >= {threshold} 404 errors...")
+
+    # Whitelist and local system IPs protection
+    whitelist = set(app_ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
+    cfg_ip = app_ctx.config.get("security.server_public_ip")
+    if cfg_ip:
+        whitelist.add(str(cfg_ip).strip())
+    try:
+        import socket
+        hostname = socket.gethostname()
+        for host_ip in socket.gethostbyname_ex(hostname)[2]:
+            whitelist.add(host_ip)
+    except Exception:
+        pass
+
+    ip_counts: Dict[str, int] = {}
+    total_404s = 0
+    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            m = _ACCESS_LOG_LINE.search(line)
+            if m and m.group("status") == "404":
+                if "SHSM-Monitor" in line:
+                    continue
+                ip = m.group("ip")
+                if ip:
+                    total_404s += 1
+                    ip_counts[ip] = ip_counts.get(ip, 0) + 1
+
+    targets = [
+        (ip, cnt) for ip, cnt in ip_counts.items()
+        if cnt >= threshold and ip not in whitelist and not ip.startswith("127.")
+    ]
+    targets.sort(key=lambda x: x[1], reverse=True)
+
+    click.echo(f"Total 404 requests in log: {total_404s}. Found {len(targets)} external IP(s) exceeding threshold ({threshold}).")
+    if not targets:
+        click.secho("No external scanner IPs exceeded the threshold.", fg="green")
+        return
+
+    click.echo(f"\n{'IP Address':<20} {'404 Hits':<10} {'Action / Status'}")
+    click.echo("-" * 65)
+
+    banned_count = 0
+    for ip, cnt in targets:
+        if dry_run:
+            click.echo(f"{ip:<20} {cnt:<10} [DRY-RUN] Would be blocked via iptables DROP")
+        else:
+            ok, msg = blocked.ban_ip_unified(app_ctx, ip, use_iptables=True)
+            if ok:
+                banned_count += 1
+                click.secho(f"{ip:<20} {cnt:<10} [BANNED] {msg}", fg="green")
+            else:
+                click.secho(f"{ip:<20} {cnt:<10} [FAILED] {msg}", fg="yellow")
+
+    if dry_run:
+        click.secho(f"\nDry-run completed. {len(targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
+    else:
+        click.secho(f"\nSuccessfully processed {len(targets)} IP(s) ({banned_count} newly blocked in iptables).", fg="green", bold=True)
 
 
 if __name__ == "__main__":
