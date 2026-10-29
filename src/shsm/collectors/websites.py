@@ -33,67 +33,85 @@ def _check_http(
     user_agent: str,
     expected_statuses: List[int],
     max_redirects: int = 5,
+    retries: int = 2,
 ) -> Dict[str, Any]:
     if not expected_statuses:
         expected_statuses = [200, 201, 204, 301, 302, 307, 308, 401, 403]
 
     url = f"{scheme}://{domain}/"
-    headers = {"User-Agent": user_agent}
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
     start = time.monotonic()
-    try:
-        session = requests.Session()
-        session.max_redirects = max_redirects
-        resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=False)
-        duration_ms = (time.monotonic() - start) * 1000.0
+    last_err_type = "unknown"
+    last_err_msg = ""
 
-        chain = [r.url for r in resp.history] + [resp.url]
-        code = resp.status_code
+    for attempt in range(retries + 1):
+        try:
+            session = requests.Session()
+            session.max_redirects = max_redirects
+            resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True, verify=False)
+            duration_ms = (time.monotonic() - start) * 1000.0
 
-        # Check HTTPS redirect behavior
-        https_redirect = False
-        if scheme == "http" and resp.history:
-            https_redirect = any(u.startswith("https://") for u in chain)
+            chain = [r.url for r in resp.history] + [resp.url]
+            code = resp.status_code
 
-        is_ok = code in expected_statuses
+            # Check HTTPS redirect behavior
+            https_redirect = False
+            if scheme == "http" and resp.history:
+                https_redirect = any(u.startswith("https://") for u in chain)
 
-        return {
-            "ok": is_ok,
-            "status_code": code,
-            "response_ms": duration_ms,
-            "chain": chain,
-            "https_redirect": https_redirect,
-            "error": None if is_ok else f"Unexpected status code {code} (expected {expected_statuses})",
-        }
-    except requests.exceptions.Timeout:
-        duration_ms = (time.monotonic() - start) * 1000.0
-        return {
-            "ok": False,
-            "status_code": None,
-            "response_ms": duration_ms,
-            "chain": [],
-            "https_redirect": False,
-            "error": f"Connection timed out after {timeout}s",
-        }
-    except requests.exceptions.SSLError as exc:
-        duration_ms = (time.monotonic() - start) * 1000.0
-        return {
-            "ok": False,
-            "status_code": None,
-            "response_ms": duration_ms,
-            "chain": [],
-            "https_redirect": False,
-            "error": f"TLS/SSL handshake error: {exc}",
-        }
-    except Exception as exc:
-        duration_ms = (time.monotonic() - start) * 1000.0
-        return {
-            "ok": False,
-            "status_code": None,
-            "response_ms": duration_ms,
-            "chain": [],
-            "https_redirect": False,
-            "error": f"Request failed: {exc}",
-        }
+            is_ok = code in expected_statuses
+
+            return {
+                "ok": is_ok,
+                "status_code": code,
+                "response_ms": duration_ms,
+                "chain": chain,
+                "https_redirect": https_redirect,
+                "error_type": None if is_ok else "http_status",
+                "error": None if is_ok else f"Unexpected status code {code} (expected {expected_statuses})",
+            }
+        except requests.exceptions.Timeout as exc:
+            last_err_type = "timeout"
+            last_err_msg = f"Connection timed out after {timeout}s"
+            continue
+        except requests.exceptions.SSLError as exc:
+            # Check if this SSLError is actually a handshake timeout
+            err_text = str(exc).lower()
+            if "timed out" in err_text or "timeout" in err_text:
+                last_err_type = "timeout"
+                last_err_msg = f"TLS handshake timed out after {timeout}s"
+                continue
+            last_err_type = "ssl"
+            last_err_msg = f"TLS/SSL handshake error: {exc}"
+            break
+        except requests.exceptions.ConnectionError as exc:
+            err_text = str(exc).lower()
+            if "timed out" in err_text or "timeout" in err_text:
+                last_err_type = "timeout"
+                last_err_msg = f"Connection timed out after {timeout}s"
+                continue
+            last_err_type = "connection"
+            last_err_msg = f"Connection error: {exc}"
+            break
+        except Exception as exc:
+            last_err_type = "generic"
+            last_err_msg = f"Request failed: {exc}"
+            break
+
+    duration_ms = (time.monotonic() - start) * 1000.0
+    return {
+        "ok": False,
+        "status_code": None,
+        "response_ms": duration_ms,
+        "chain": [],
+        "https_redirect": False,
+        "error_type": last_err_type,
+        "error": last_err_msg,
+    }
 
 
 def check_single_website(
@@ -245,18 +263,33 @@ def collect(ctx: Context) -> CollectorOutput:
             failures = [f for f in recent_results if not f]
 
             is_confirmed_outage = len(failures) >= fail_threshold
-            status = CheckStatus.CRITICAL if is_confirmed_outage else CheckStatus.WARNING
-            summary = f"Outage on {domain}: {primary['error']}"
+            err_type = primary.get("error_type")
+
+            if err_type == "timeout":
+                # Network or probe timeout: distinguish from hard server error (4xx/5xx)
+                status = CheckStatus.WARNING
+                summary = f"Website check timed out for {domain}: {primary['error']}"
+                finding_sev = Severity.HIGH if is_confirmed_outage else Severity.MEDIUM
+                finding_conf = Confidence.HIGH if is_confirmed_outage else Confidence.LOW
+                finding_title = f"Website probe timed out for {domain}"
+                finding_rec = "Check network latency, probe firewall rules, or OpenLiteSpeed per-client connection limits. The site may still be accessible to external browsers."
+            else:
+                status = CheckStatus.CRITICAL if is_confirmed_outage else CheckStatus.WARNING
+                summary = f"Outage on {domain}: {primary['error']}"
+                finding_sev = Severity.CRITICAL if is_confirmed_outage else Severity.HIGH
+                finding_conf = Confidence.CONFIRMED if is_confirmed_outage else Confidence.MEDIUM
+                finding_title = f"Website outage or error on {domain}"
+                finding_rec = "Verify OpenLiteSpeed vhost configuration, document root permissions, and application index files."
 
             out.check("website.http", CATEGORY, status, summary, asset=domain, source=SOURCE)
             out.finding(
                 "website.http",
                 CATEGORY,
-                Severity.CRITICAL if is_confirmed_outage else Severity.HIGH,
-                Confidence.CONFIRMED if is_confirmed_outage else Confidence.MEDIUM,
-                f"Website outage or error on {domain}",
+                finding_sev,
+                finding_conf,
+                finding_title,
                 f"Health check failed for {domain}. Error: {primary['error']}. Status: {primary['status_code']}.",
-                "Verify OpenLiteSpeed vhost configuration, document root permissions, and application index files.",
+                finding_rec,
                 asset=domain,
                 source=SOURCE,
                 key=domain,
