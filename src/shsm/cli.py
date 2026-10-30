@@ -1130,5 +1130,48 @@ def cmd_block_scanners(click_ctx: click.Context, threshold: int, log_file: Optio
         click.secho(f"\nSuccessfully processed {len(targets)} IP(s) ({banned_count} newly blocked in iptables).", fg="green", bold=True)
 
 
+# ---------------------------------------------------------------- systemd unit generator
+@main.group("systemd")
+def grp_systemd() -> None:
+    """Manage systemd services and timers."""
+
+
+@grp_systemd.command("install")
+@click.option("--output-dir", default="/etc/systemd/system", help="Directory to write systemd unit files")
+@click.option("--reload", "do_reload", is_flag=True, default=True, help="Run systemctl daemon-reload and start timers")
+@click.pass_context
+def cmd_systemd_install(click_ctx: click.Context, output_dir: str, do_reload: bool) -> None:
+    """Generate and install all systemd service and timer unit files."""
+    import subprocess
+    from shsm.deploy.systemd import write_all_units
+
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
+    bin_path = str(app_ctx.runner.which("shsm") or "/opt/shsm/venv/bin/shsm")
+    cfg_path = str(click_ctx.obj.get("config_path") or "/etc/shsm/config.yaml")
+
+    click.echo(f"Generating systemd service and timer unit files in {output_dir}...")
+    try:
+        files = write_all_units(output_dir, bin_path=bin_path, cfg_path=cfg_path)
+        click.secho(f"Successfully generated {len(files)} unit file(s).", fg="green")
+    except Exception as exc:
+        click.secho(f"[ERROR] Failed to write unit files: {exc}", fg="red")
+        sys.exit(1)
+
+    if do_reload and os.path.isdir(output_dir) and output_dir.startswith("/etc/systemd"):
+        try:
+            subprocess.run(["systemctl", "daemon-reload"], check=True)
+            click.echo("Systemd daemon reloaded.")
+            # Enable and start timers
+            timer_count = 0
+            for f in files:
+                if f.endswith(".timer"):
+                    t_name = os.path.basename(f)
+                    subprocess.run(["systemctl", "enable", "--now", t_name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    timer_count += 1
+            click.secho(f"Enabled and started {timer_count} systemd timer(s).", fg="green", bold=True)
+        except Exception as exc:
+            click.secho(f"[WARNING] Could not reload systemd or enable timers: {exc}", fg="yellow")
+
+
 if __name__ == "__main__":
     main()
