@@ -142,6 +142,29 @@ def collect(ctx: Context) -> CollectorOutput:
         out.metric("ssh.successful_logins", successes)
         out.metric("ssh.root_logins", roots)
 
+        # Immediate root login detection
+        if roots > 0:
+            root_ips = ", ".join(auth_data["root_logins"])
+            out.check(
+                "ssh.root_login",
+                CATEGORY,
+                CheckStatus.CRITICAL,
+                f"SSH root login detected from: {root_ips}",
+                source=SOURCE,
+            )
+            out.finding(
+                "ssh.root_login",
+                CATEGORY,
+                Severity.CRITICAL,
+                Confidence.CONFIRMED,
+                f"SSH root login detected from {root_ips}",
+                f"An accepted SSH session for user 'root' was detected from IP(s): {root_ips}. Unauthorized root access presents severe system security risks.",
+                "Verify whether this root session was authorized. If unexpected, investigate bash history, check active sessions (w/who), revoke compromised SSH keys, and consider disabling PermitRootLogin in /etc/ssh/sshd_config.",
+                asset=root_ips,
+                source=SOURCE,
+                key=f"root_login_{root_ips}",
+            )
+
         warn_fail = ctx.threshold("ssh_failed_warning")
         crit_fail = ctx.threshold("ssh_failed_critical")
 

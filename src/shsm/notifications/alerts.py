@@ -44,6 +44,9 @@ class AlertManager:
         min_sev_str = str(self.ctx.config.get("alerts.min_severity", "CRITICAL"))
         min_sev = getattr(Severity, min_sev_str, Severity.CRITICAL)
 
+        digest_mode = bool(self.ctx.config.get("alerts.digest_mode", False))
+        instant_checks = set(self.ctx.config.get("alerts.instant_check_ids", ["ssh.root_login"]))
+
         to_alert: List[FindingCandidate] = []
 
         for cand in new_findings:
@@ -52,6 +55,16 @@ class AlertManager:
 
             fp = cand.fingerprint
             existing = self.ctx.alerts.get(fp)
+
+            # In digest mode, skip sending immediate email UNLESS the check is in instant_checks
+            is_instant = cand.check_id in instant_checks
+            if digest_mode and not is_instant:
+                # Still record activation/touch in database so it appears in status/digest
+                if not existing:
+                    self.ctx.alerts.activate(fp, None, cand.severity.value, cand.category, cand.title, now)
+                else:
+                    self.ctx.alerts.touch(fp, now)
+                continue
 
             if not existing:
                 # First time alerting
@@ -68,9 +81,9 @@ class AlertManager:
         if to_alert:
             dispatched_count = self._send_grouped_alert(to_alert)
 
-        # Handle recovery notifications
+        # Handle recovery notifications (skip recovery emails if digest_mode is enabled)
         recovered_count = 0
-        if self.ctx.config.get("alerts.recovery_notifications", True) and resolved_finding_ids:
+        if not digest_mode and self.ctx.config.get("alerts.recovery_notifications", True) and resolved_finding_ids:
             recovered_count = self._process_recoveries(resolved_finding_ids)
 
         return {

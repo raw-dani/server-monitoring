@@ -72,6 +72,15 @@ def weekly_period(now: datetime, tz_name: str = DEFAULT_TZ) -> Tuple[datetime, d
     return start, end
 
 
+def daily_period(now: datetime, tz_name: str = DEFAULT_TZ) -> Tuple[datetime, datetime]:
+    """Yesterday 00:00 (inclusive) to today 00:00 (exclusive), in local time, as aware datetimes."""
+    tz = get_tz(tz_name)
+    local = now.astimezone(tz)
+    today_midnight = _local_midnight(datetime(local.year, local.month, local.day, tzinfo=tz), tz)
+    yesterday_midnight = today_midnight - timedelta(days=1)
+    return yesterday_midnight, today_midnight
+
+
 def monthly_period(now: datetime, tz_name: str = DEFAULT_TZ) -> Tuple[datetime, datetime]:
     """First day of the previous calendar month (inclusive) to first day of this month (exclusive)."""
     tz = get_tz(tz_name)

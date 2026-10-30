@@ -45,6 +45,8 @@ email:
   #   - report-team@yourdomain.com
 
   # Opsional: Jika ingin membedakan penerima per jenis report secara spesifik
+  daily_recipients:
+    - [EMAIL_ADDRESS]
   weekly_recipients:
     - [EMAIL_ADDRESS]
   monthly_recipients:
@@ -305,6 +307,9 @@ integrity:
 
 alerts:
   enabled: true
+  digest_mode: false                    # Set to true to suppress instant alert spam and receive 1 daily digest report instead
+  instant_check_ids:                    # Checks that will ALWAYS send instant alert emails even in digest_mode
+    - ssh.root_login
   min_severity: CRITICAL
   min_confidence: MEDIUM
   cooldown_minutes: 60

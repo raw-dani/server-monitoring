@@ -789,7 +789,29 @@ def cmd_external_send(click_ctx: click.Context) -> None:
 # ---------------------------------------------------------------- reports
 @main.group("report")
 def grp_report() -> None:
-    """Generate weekly and monthly reports."""
+    """Generate daily digest, weekly, and monthly reports."""
+
+
+@grp_report.command("daily")
+@click.option("--preview", is_flag=True, help="Print report text to terminal")
+@click.option("--send", is_flag=True, help="Generate and send report via email with PDF attached")
+@click.pass_context
+def cmd_report_daily(click_ctx: click.Context, preview: bool, send: bool) -> None:
+    """Generate daily digest HTML & PDF report."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.reporting.daily import generate_daily_report
+    html_p, pdf_p, r_id = generate_daily_report(app_ctx, send_email=send)
+    click.secho(f"Daily digest report generated (ID: {r_id}):", fg="green")
+    click.echo(f"  HTML: {html_p}")
+    click.echo(f"  PDF:  {pdf_p}")
+    if preview:
+        from shsm.core.timeutils import daily_period
+        from shsm.reporting.daily import assemble_daily_data
+        start, end = daily_period(app_ctx.now(), app_ctx.tz)
+        data = assemble_daily_data(app_ctx, start, end)
+        click.echo("-" * 60)
+        click.echo(f"Health: {data['health_score']:.1f}% | Security: {data['security_score']:.1f}%")
+        click.echo(f"Open Findings: {len(data['findings'])}")
 
 
 @grp_report.command("weekly")
