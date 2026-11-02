@@ -219,32 +219,47 @@ def collect(ctx: Context) -> CollectorOutput:
             action_notes = []
 
             # Automatically ban offending IPs in Fail2Ban if active defense is enabled
+            auto_ban_success = False
             if auto_block:
                 unique_ips = {s.get("ip") for s in suspicious if s.get("ip")}
+                banned_count = 0
                 for s_ip in unique_ips:
                     ok, detail = fail2ban.ban_ip(ctx, s_ip, jail=target_jail)
                     if ok:
+                        banned_count += 1
                         action_notes.append(f"Auto-banned {s_ip} in Fail2Ban")
+                if banned_count > 0:
+                    auto_ban_success = True
 
             out.check(
                 "openlitespeed.exploit_attempts",
                 CATEGORY,
-                CheckStatus.CRITICAL,
+                CheckStatus.PASS if auto_ban_success else CheckStatus.CRITICAL,
+                f"Detected {len(suspicious)} suspicious exploit request(s) targeting PHP2Shell/webshells (Mitigated: Auto-banned)"
+                if auto_ban_success else
                 f"Detected {len(suspicious)} suspicious exploit request(s) targeting PHP2Shell/webshells",
                 source=SOURCE,
             )
             action_suffix = f" ({'; '.join(action_notes)})." if action_notes else ""
+            from shsm.core.findings import FindingStatus
+            exploit_status = FindingStatus.RESOLVED if auto_ban_success else FindingStatus.OPEN
+            exploit_rec = "Offending IP has been automatically banned in Fail2Ban. Review uploaded files if necessary." if auto_ban_success else \
+                "Review the requesting IP in firewall/Fail2Ban, quarantine any files created at that path, and ensure PHP execution in uploads is blocked."
+
             out.finding(
                 "openlitespeed.exploit_attempts",
                 "security",
-                Severity.CRITICAL,
+                Severity.LOW if auto_ban_success else Severity.CRITICAL,
                 Confidence.CONFIRMED,
+                f"Suspicious exploit request detected in OpenLiteSpeed access log (Auto-Blocked)" if auto_ban_success else
                 f"Suspicious exploit request detected in OpenLiteSpeed access log",
                 f"Detected {len(suspicious)} request(s) matching known PHP2Shell/webshell injection paths. Example: IP {sample.get('ip')} requested '{sample.get('path')}' (status: {sample.get('status')}).{action_suffix}",
-                "Review the requesting IP in firewall/Fail2Ban, quarantine any files created at that path, and ensure PHP execution in uploads is blocked.",
+                exploit_rec,
                 asset=sample.get("ip", "network"),
                 source=SOURCE,
                 key=f"ols:exploit:{sample.get('ip')}:{sample.get('path')}",
+                initial_status=exploit_status,
+                status_note="Automatically blocked and resolved via active Fail2Ban defense" if auto_ban_success else "",
             )
         else:
             out.check(
@@ -283,37 +298,51 @@ def collect(ctx: Context) -> CollectorOutput:
         if abusive_404_ips:
             from shsm.security import blocked
             ban_notes = []
+            auto_drop_success = False
             if auto_block_404:
                 # Limit direct kernel drop to top 10 offenders per execution cycle
                 # to prevent spawning excessive subprocesses during massive bot floods
                 sorted_abusive = sorted(abusive_404_ips.items(), key=lambda x: x[1], reverse=True)[:10]
+                dropped_count = 0
                 for a_ip, a_cnt in sorted_abusive:
                     b_ok, b_msg = blocked.ban_ip_unified(ctx, a_ip, use_iptables=True)
                     if b_ok:
+                        dropped_count += 1
                         ban_notes.append(f"Auto-dropped {a_ip} in iptables ({a_cnt} 404s)")
                     else:
                         ban_notes.append(f"Failed iptables drop {a_ip}: {b_msg}")
+                if dropped_count > 0:
+                    auto_drop_success = True
 
             top_offender = max(abusive_404_ips.items(), key=lambda x: x[1])
             ban_suffix = f" Actions taken: {'; '.join(ban_notes)}." if ban_notes else ""
+            from shsm.core.findings import FindingStatus
+            scanner_status = FindingStatus.RESOLVED if auto_drop_success else FindingStatus.OPEN
+            scanner_rec = "The offending scanner IP(s) have been auto-dropped at kernel layer via iptables. No further action needed." if auto_drop_success else \
+                "The IP(s) exceeded 404 thresholds. Ensure OpenLiteSpeed client throttling or Fail2Ban jail is active."
 
             out.finding(
                 "openlitespeed.scanner_404_flood",
                 "security",
-                Severity.CRITICAL,
+                Severity.LOW if auto_drop_success else Severity.CRITICAL,
                 Confidence.CONFIRMED,
+                f"Aggressive 404 flood/botnet scanner detected on OpenLiteSpeed ({len(abusive_404_ips)} IPs) (Auto-Dropped)" if auto_drop_success else
                 f"Aggressive 404 flood/botnet scanner detected on OpenLiteSpeed ({len(abusive_404_ips)} IPs)",
                 f"Detected {len(abusive_404_ips)} IP(s) generating abnormal 404 bursts. "
                 f"Top violator: IP {top_offender[0]} generated {top_offender[1]} 404 requests.{ban_suffix}",
-                "The IP(s) have been auto-blocked. Ensure OpenLiteSpeed client throttling is active.",
+                scanner_rec,
                 asset=top_offender[0],
                 source=SOURCE,
                 key=f"ols:404_flood:{top_offender[0]}",
+                initial_status=scanner_status,
+                status_note="Automatically blocked and resolved via iptables drop rule" if auto_drop_success else "",
             )
             out.check(
                 "openlitespeed.scanner_404_flood",
                 CATEGORY,
-                CheckStatus.CRITICAL,
+                CheckStatus.PASS if auto_drop_success else CheckStatus.CRITICAL,
+                f"Detected {len(abusive_404_ips)} aggressive 404 scanner IP(s) (Mitigated: Auto-dropped in iptables). Top: {top_offender[0]} ({top_offender[1]} 404s)"
+                if auto_drop_success else
                 f"Detected {len(abusive_404_ips)} aggressive 404 scanner IP(s). Top: {top_offender[0]} ({top_offender[1]} 404s)",
                 asset=top_offender[0],
                 source=SOURCE,

@@ -118,6 +118,8 @@ class FindingCandidate:
     source: str = ""
     key: str = ""  # extra identity component (e.g. file path, port)
     details: Dict[str, Any] = field(default_factory=dict)
+    initial_status: FindingStatus = FindingStatus.OPEN
+    status_note: str = ""
 
     def __post_init__(self) -> None:
         self.title = sanitize_excerpt(self.title, 200)
@@ -154,9 +156,11 @@ class CollectorOutput:
 
     def finding(self, check_id: str, category: str, severity: Severity, confidence: Confidence,
                 title: str, evidence: str, recommendation: str, asset: str = "", source: str = "",
-                key: str = "", **details: Any) -> FindingCandidate:
+                key: str = "", initial_status: FindingStatus = FindingStatus.OPEN,
+                status_note: str = "", **details: Any) -> FindingCandidate:
         cand = FindingCandidate(check_id, category, severity, confidence, title, evidence,
-                                recommendation, asset, source, key, details)
+                                recommendation, asset, source, key, details,
+                                initial_status=initial_status, status_note=status_note)
         self.findings.append(cand)
         return cand
 

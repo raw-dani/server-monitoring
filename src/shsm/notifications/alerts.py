@@ -53,6 +53,11 @@ class AlertManager:
             if cand.severity.rank < min_sev.rank:
                 continue
 
+            # If finding was already resolved immediately (e.g. successfully auto-blocked), do not trigger instant critical alerts
+            from shsm.core.findings import FindingStatus
+            if cand.initial_status == FindingStatus.RESOLVED:
+                continue
+
             fp = cand.fingerprint
             existing = self.ctx.alerts.get(fp)
 
