@@ -54,6 +54,89 @@ def main(ctx: click.Context, config_path: Optional[str]) -> None:
     ctx.obj["config_path"] = config_path
 
 
+# ---------------------------------------------------------------- commands cheatsheet / guide
+@main.command("commands")
+@click.pass_context
+def cmd_commands(click_ctx: click.Context) -> None:
+    """Display comprehensive cheatsheet of all available SHSM commands with descriptions."""
+    click.secho("================================================================================", fg="cyan", bold=True)
+    click.secho(f" SHSM COMMANDS REFERENCE & CHEATSHEET (v{__version__})", fg="cyan", bold=True)
+    click.secho("================================================================================", fg="cyan", bold=True)
+    click.echo("Usage syntax: sudo -u shsm shsm <command> [subcommand] [options]\n")
+
+    categories = [
+        ("1. STATUS & DIAGNOSTICS", [
+            ("shsm status", "Show overall health & security scores, subsystem breakdown, and active issues."),
+            ("shsm status --json", "Output full server status in JSON format for APIs/external dashboards."),
+            ("shsm doctor", "Run self-diagnostics: SQLite WAL integrity, permissions, binaries, timers."),
+            ("shsm commands", "Show this commands reference list and quick guide."),
+        ]),
+        ("2. ACTIVE DEFENSE & IP BLOCKING", [
+            ("shsm blocked", "List all IPs and subnets currently blocked across Fail2Ban and iptables."),
+            ("shsm blocked <IP>", "Check if a specific IP or CIDR subnet is currently blocked."),
+            ("shsm ban <IP>", "Block offending IP address (Fail2Ban with automatic iptables fallback)."),
+            ("shsm ban <IP> --iptables", "Drop offending IP directly at kernel firewall layer (0% CPU OLS/PHP)."),
+            ("shsm unban <IP>", "Unban an IP address centrally from BOTH Fail2Ban and iptables."),
+            ("shsm block-scanners", "Scan access logs, aggregate 404s, and auto-drop scanner bot IPs in iptables."),
+            ("shsm block-scanners --dry-run", "Preview scanner bot IPs exceeding 404 threshold without blocking."),
+        ]),
+        ("3. FINDINGS & ISSUE MANAGEMENT", [
+            ("shsm findings list", "List active/open security and health findings."),
+            ("shsm findings list --status ALL", "List all historical findings (OPEN, RESOLVED, ACKNOWLEDGED)."),
+            ("shsm findings resolve <UID>", "Mark a specific finding as RESOLVED by its 12-char UID."),
+            ("shsm findings resolve all", "Close/resolve all currently active findings at once."),
+            ("shsm findings resolve all-malware", "Close/resolve all malware scan findings at once."),
+        ]),
+        ("4. WEBSITES & SSL MONITORING", [
+            ("shsm websites list", "Display registered domains, doc roots, latest HTTP status, and SSL days."),
+            ("shsm websites check", "Execute real-time DNS, HTTP/HTTPS response latency, and SSL check."),
+            ("shsm websites discover", "Auto-discover websites from CyberPanel database, OLS vhosts, and /home."),
+            ("shsm websites cleanup", "Batch remove dead/suspended websites and mail subdomains from inventory."),
+            ("shsm websites remove <domain>", "Remove a specific domain from active monitoring inventory."),
+        ]),
+        ("5. METRIC COLLECTORS (ON-DEMAND)", [
+            ("shsm collect health", "Collect CPU, RAM, swap, disk space, IO, and top process metrics."),
+            ("shsm collect services", "Audit status of systemd services (OLS, MariaDB, Redis, SSH, Cron)."),
+            ("shsm collect databases", "Check MariaDB connection pool, slow queries, and Redis latency/memory."),
+            ("shsm collect openlitespeed", "Parse OpenLiteSpeed access/error logs for 404 floods, 5xx, and exploits."),
+            ("shsm collect ddos", "Audit concurrent TCP connection sockets on port 80/443 per IP."),
+            ("shsm collect mail", "Inspect Postfix mail queue and detect unauthorized outbound SMTP connections."),
+        ]),
+        ("6. SECURITY AUDITS & SCANNERS", [
+            ("shsm security audit", "Run SSH configuration, auth logs, firewall status, and Fail2Ban audits."),
+            ("shsm security ols-ddos", "Audit OpenLiteSpeed anti-DDoS, client throttling, and challenge settings."),
+            ("shsm security rbl", "Check server public IP reputation against 6 major DNSBL/RBL spam blacklists."),
+            ("shsm security scan --profile quick", "Run quick heuristic malware & executable scan on web docroots."),
+            ("shsm security scan --profile full", "Run deep malware scan (heuristic, ClamAV, Lynis, and rootkit)."),
+        ]),
+        ("7. WORDPRESS SECURITY & INTEGRITY (FIM)", [
+            ("shsm wordpress discover", "Auto-discover WordPress installations in web document roots."),
+            ("shsm wordpress audit", "Audit WordPress core checksums, plugin/theme vulnerabilities, and admins."),
+            ("shsm integrity status", "Show file integrity baseline count and tracked critical system files."),
+            ("shsm integrity check", "Check system files (/etc/passwd, shadow, sudoers, sshd) against baseline."),
+            ("shsm integrity baseline", "Build or refresh file integrity baseline (admin action after updates)."),
+        ]),
+        ("8. REPORTS & SYSTEMD AUTOMATION", [
+            ("shsm report daily --preview", "Preview Daily Digest executive summary to terminal."),
+            ("shsm report daily --send", "Generate and email Daily Digest executive report with PDF attachment."),
+            ("shsm report weekly --send", "Generate and email Weekly executive report with PDF attachment."),
+            ("shsm report monthly --send", "Generate and email Monthly executive report with PDF attachment."),
+            ("shsm systemd install", "Generate, install, and enable all systemd service & timer unit files."),
+            ("shsm db backup", "Create a verified hot SQLite snapshot backup in /var/lib/shsm/backups."),
+            ("shsm email test", "Verify SMTP email connection and send a test email to default recipient."),
+        ]),
+    ]
+
+    for section_title, cmds in categories:
+        click.secho(section_title, fg="yellow", bold=True)
+        for cmd_name, desc in cmds:
+            click.echo(f"  {cmd_name:<36} : {desc}")
+        click.echo()
+
+    click.secho("--------------------------------------------------------------------------------", fg="cyan")
+    click.secho("Tip: Jalankan 'sudo -u shsm shsm <perintah> --help' untuk melihat opsi/argumen tiap perintah.", fg="green")
+
+
 # ---------------------------------------------------------------- status & doctor
 @main.command("status")
 @click.option("--json", "as_json", is_flag=True, help="Output status as JSON")
