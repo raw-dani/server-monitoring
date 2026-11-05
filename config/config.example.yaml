@@ -292,6 +292,16 @@ security:
   # firewall_custom_cmd: ["/sbin/iptables", "-L", "-n"]
   documented_exceptions: []
 
+  # Global IP whitelist for internal systems, office IP, and monitoring
+  ip_whitelist:
+    - "127.0.0.1"
+    - "::1"
+
+  # Whitelist IP admin yang diizinkan login sebagai root via SSH tanpa memicu alert CRITICAL
+  root_login_whitelist:
+    - "118.99.113.14"
+
+
 integrity:
   paths:
     - /etc/passwd

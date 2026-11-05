@@ -38,6 +38,27 @@ def test_ssh_collector_flags_root_login(test_db, sample_config):
         assert "1.2.3.4" in findings[0].asset
 
 
+def test_ssh_root_login_whitelist(test_db, sample_config):
+    sample_config.data["security"]["root_login_whitelist"] = ["118.99.113.14"]
+    ctx = Context(sample_config, test_db)
+    sample_lines = [
+        "Oct 30 08:12:00 host sshd[1234]: Accepted publickey for root from 118.99.113.14 port 54321 ssh2"
+    ]
+    with patch("os.path.isfile", return_value=True), \
+         patch.object(ctx.tailer, "read_new") as mock_tail:
+        mock_res = MagicMock()
+        mock_res.lines = sample_lines
+        mock_tail.return_value = mock_res
+
+        out = collect_ssh(ctx)
+        findings = [f for f in out.findings if f.check_id == "ssh.root_login"]
+        assert len(findings) == 0
+        checks = [c for c in out.checks if c.check_id == "ssh.root_login"]
+        assert len(checks) == 1
+        assert checks[0].status.value == "PASS"
+
+
+
 def test_alert_manager_digest_mode_suppression(test_db, sample_config):
     sample_config.data["alerts"]["digest_mode"] = True
     sample_config.data["alerts"]["instant_check_ids"] = ["ssh.root_login"]
