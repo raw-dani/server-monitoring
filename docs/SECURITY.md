@@ -139,4 +139,9 @@ In CyberPanel / OpenLiteSpeed WebAdmin Console:
 3. Set **Banning Period (secs)** (e.g., 60-300).
 4. Under **reCaptcha / Bot Verification**, enable the Anti-DDoS challenge. Legitimate web browsers will execute JavaScript and pass seamlessly, while headless bot scripts (curl, python, flooders) are instantly dropped with HTTP 403.
 
-
+### 4. ConfigServer Security & Firewall (CSF / LFD)
+Jika server menggunakan CSF/LFD (misal di lingkungan CyberPanel):
+- **LFD (Login Failure Daemon)** menggantikan fungsi Fail2Ban untuk memitigasi brute-force SSH, FTP, dan webmail.
+- **Port Khusus**: Pastikan port SSH kustom (misal 22891) selalu didaftarkan pada TCP_IN dan TCP_OUT di /etc/csf/csf.conf.
+- **IP Whitelist**: IP administrator wajib didaftarkan di /etc/csf/csf.allow dan /etc/csf/csf.ignore agar tidak ter-block otomatis oleh LFD.
+- **Daftar Blokir Manual / Script**: IP penyerang persisten dicatat di /etc/csf/csf.deny.

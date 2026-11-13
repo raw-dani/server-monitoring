@@ -386,3 +386,6 @@ journalctl -u shsm-mail.service -n 50 --no-pager
 journalctl -u shsm-health.service -n 50 --no-pager
 ```
 
+
+
+- **[Panduan Instalasi & Migrasi Firewall CSF](CSF_INSTALLATION.md)**: Prosedur instalasi, pencegahan SSH lockout, dan impor blacklist IP lama ke CSF/LFD.

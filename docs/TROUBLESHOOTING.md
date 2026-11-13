@@ -473,3 +473,52 @@ journalctl -u shsm-openlitespeed.service -n 50 --no-pager
 journalctl -u shsm-ddos.service -n 50 --no-pager
 ```
 
+
+
+---
+
+## 4. Panduan Operasional Firewall CSF (ConfigServer Security & Firewall)
+
+Jika server menggunakan **CSF/LFD** (standar CyberPanel / LiteSpeed) menggantikan UFW dan Fail2ban:
+
+### A. Perintah Cepat Harian (CLI Cheat Sheet)
+| Operasi | Perintah | Keterangan |
+| :--- | :--- | :--- |
+| **Blokir IP Permanen** | `csf -d <IP> "Alasan"` | Menambahkan IP ke `/etc/csf/csf.deny` dan langsung drop di iptables |
+| **Buka Blokir IP (Unban)** | `csf -dr <IP>` | Menghapus IP dari deny list dan membuka aksesnya kembali |
+| **Whitelist IP Administrator** | `csf -a <IP> "Admin Home/Office"` | Menambahkan IP ke `/etc/csf/csf.allow` |
+| **Hapus dari Whitelist** | `csf -ar <IP>` | Menghapus IP dari allow list |
+| **Cek Status IP (Paling Sering Digunakan)** | `csf -g <IP>` | Memeriksa apakah IP terblokir di deny list, allow list, atau iptables |
+| **Reload / Restart Firewall** | `csf -r` | Menerapkan ulang seluruh rules konfigurasi CSF |
+| **Lihat Daftar Blokir Teratas** | `head -n 30 /etc/csf/csf.deny` | Melihat riwayat IP yang diblokir beserta alasannya |
+
+### B. Mencegah Admin Terkunci (SSH Lockout Prevention)
+1. **Port SSH Kustom**:
+   Jika SSH menggunakan port non-standar (misalnya `22891`), pastikan port tersebut terdaftar di `/etc/csf/csf.conf`:
+   ```ini
+   TCP_IN = "...,22891"
+   TCP_OUT = "...,22891"
+   ```
+2. **Whitelist IP Admin**:
+   Daftarkan IP admin di dua file utama:
+   - `/etc/csf/csf.allow` (Lolosan firewall)
+   - `/etc/csf/csf.ignore` (Diabaikan oleh Login Failure Daemon / LFD)
+
+### C. Mengatasi Masalah IP Admin Tidak Sengaja Terblokir
+Jika ada admin/developer yang tidak bisa mengakses SSH tetapi web berjalan normal:
+```bash
+# 1. Cek apakah IP mereka terblokir
+csf -g <IP_ADMIN>
+
+# 2. Hapus dari daftar blokir
+csf -dr <IP_ADMIN>
+
+# 3. Masukkan ke whitelist permanen
+csf -a <IP_ADMIN> "Developer IP"
+csf -r
+```
+
+### D. Kelola Melalui GUI CyberPanel
+CSF juga dapat dikelola via antarmuka web browser:
+- Akses CyberPanel: `https://<IP_SERVER>:8090`
+- Menu: **Security** -> **ConfigServer CSF**
