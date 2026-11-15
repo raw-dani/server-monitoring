@@ -397,4 +397,5 @@ journalctl -u shsm-health.service -n 50 --no-pager
 
 
 
-- **[Panduan Instalasi & Migrasi Firewall CSF](CSF_INSTALLATION.md)**: Prosedur instalasi, pencegahan SSH lockout, dan impor blacklist IP lama ke CSF/LFD.
+- **[Panduan Instalasi & Migrasi Firewall CSF](CSF_INSTALLATION.md)**
+- **[Panduan Proteksi DDoS Cerdas (Adaptive Anti-DDoS)](SMART_DDOS_PROTECTION.md)**: Arsitektur pertahanan 4-lapis (Cloudflare WAF, CSF Layer-4, OpenLiteSpeed Throttling, LSCache) dan auto-blocker SHSM.: Prosedur instalasi, pencegahan SSH lockout, dan impor blacklist IP lama ke CSF/LFD.

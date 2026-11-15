@@ -161,8 +161,10 @@ def unban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple
     else:
         messages.append("Fail2Ban: client not installed, skipped")
 
-    # 2. Check and remove from iptables INPUT DROP rules
-    ipt_bin = ctx.runner.which("iptables") or ctx.runner.which("/sbin/iptables") or ctx.runner.which("/usr/sbin/iptables")
+    # 2. Check and remove from iptables/ip6tables INPUT DROP rules
+    is_v6_u = ":" in clean_ip
+    u_tool = "ip6tables" if is_v6_u else "iptables"
+    ipt_bin = ctx.runner.which(u_tool) or ctx.runner.which(f"/sbin/{u_tool}") or ctx.runner.which(f"/usr/sbin/{u_tool}")
     if ipt_bin:
         # Check if rule exists
         c_cmd = [ipt_bin, "-C", "INPUT", "-s", clean_ip, "-j", "DROP"]
@@ -173,13 +175,13 @@ def unban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple
             res_d = _run_with_sudo_fallback(ctx, d_cmd, timeout=10)
             if res_d.ok:
                 any_success = True
-                messages.append(f"iptables: Deleted DROP rule for {clean_ip} from INPUT chain")
+                messages.append(f"{u_tool}: Deleted DROP rule for {clean_ip} from INPUT chain")
             else:
-                messages.append(f"iptables: Failed to delete rule: {res_d.stderr or res_d.stdout}")
+                messages.append(f"{u_tool}: Failed to delete rule: {res_d.stderr or res_d.stdout}")
         else:
-            messages.append(f"iptables: No direct DROP rule found for {clean_ip}")
+            messages.append(f"{u_tool}: No direct DROP rule found for {clean_ip}")
     else:
-        messages.append("iptables: binary not found, skipped")
+        messages.append(f"{u_tool}: binary not found, skipped")
 
     return any_success, messages
 
@@ -210,33 +212,36 @@ def ban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None, use_iptabl
     if clean_ip in whitelist or clean_ip.startswith("127."):
         return False, f"IP {clean_ip} is in whitelist or is server loopback; refusing to ban"
 
+    is_v6 = ":" in clean_ip
+    tool_name = "ip6tables" if is_v6 else "iptables"
+
     if use_iptables:
-        ipt_bin = ctx.runner.which("iptables") or ctx.runner.which("/sbin/iptables") or ctx.runner.which("/usr/sbin/iptables")
+        ipt_bin = ctx.runner.which(tool_name) or ctx.runner.which(f"/sbin/{tool_name}") or ctx.runner.which(f"/usr/sbin/{tool_name}")
         if not ipt_bin:
-            return False, "iptables binary not found"
+            return False, f"{tool_name} binary not found"
         # Check if already dropped
         res_c = _run_with_sudo_fallback(ctx, [ipt_bin, "-C", "INPUT", "-s", clean_ip, "-j", "DROP"])
         if res_c.ok:
-            return True, f"IP {clean_ip} is already blocked in iptables"
+            return True, f"IP {clean_ip} is already blocked in {tool_name}"
         res_i = _run_with_sudo_fallback(ctx, [ipt_bin, "-I", "INPUT", "-s", clean_ip, "-j", "DROP"])
         if res_i.ok:
-            return True, f"Successfully inserted DROP rule for {clean_ip} in iptables"
-        return False, f"Failed to insert iptables DROP rule: {res_i.stderr or res_i.stdout}"
+            return True, f"Successfully inserted DROP rule for {clean_ip} in {tool_name}"
+        return False, f"Failed to insert {tool_name} DROP rule: {res_i.stderr or res_i.stdout}"
 
     # Default: Try Fail2Ban first, fallback to iptables if Fail2Ban is not available
     f_ok, f_msg = fail2ban.ban_ip(ctx, clean_ip, jail=jail)
     if f_ok:
         return True, f_msg
 
-    # Fallback to direct iptables drop
-    ipt_bin = ctx.runner.which("iptables") or ctx.runner.which("/sbin/iptables") or ctx.runner.which("/usr/sbin/iptables")
+    # Fallback to direct iptables / ip6tables drop
+    ipt_bin = ctx.runner.which(tool_name) or ctx.runner.which(f"/sbin/{tool_name}") or ctx.runner.which(f"/usr/sbin/{tool_name}")
     if ipt_bin:
         res_c = _run_with_sudo_fallback(ctx, [ipt_bin, "-C", "INPUT", "-s", clean_ip, "-j", "DROP"])
         if res_c.ok:
-            return True, f"{f_msg}. Already dropped in iptables"
+            return True, f"{f_msg}. Already dropped in {tool_name}"
         res_i = _run_with_sudo_fallback(ctx, [ipt_bin, "-I", "INPUT", "-s", clean_ip, "-j", "DROP"])
         if res_i.ok:
-            return True, f"{f_msg}. Fallback: Successfully dropped in iptables"
-        return False, f"Fail2Ban failed ({f_msg}) and iptables fallback failed: {res_i.stderr}"
+            return True, f"{f_msg}. Fallback: Successfully dropped in {tool_name}"
+        return False, f"Fail2Ban failed ({f_msg}) and {tool_name} fallback failed: {res_i.stderr}"
 
     return False, f_msg
