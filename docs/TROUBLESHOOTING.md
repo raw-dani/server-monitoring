@@ -459,6 +459,28 @@ sudo -u shsm shsm doctor
 
 ---
 
+### M. Notifikasi Integritas File (FIM) Muncul Setelah Update/Install SHSM
+- **Gejala**: Muncul serangkaian notifikasi [TINGGI] seperti:
+  - New file created in monitored directory: /etc/sudoers.d/shsm
+  - Critical system file modified: /etc/systemd/system/shsm-*.service
+- **Penyebab**: Modul File Integrity Monitoring (FIM) mendeteksi adanya file service systemd baru atau konfigurasi sudoers yang diperbarui/di-generate ulang saat menjalankan shsm systemd install atau update aplikasi. Karena hash file berubah dan belum dicatat dalam baseline FIM, sistem menandainya sebagai perubahan tidak dikenal.
+- **Solusi**:
+  1. Perbarui cryptographic baseline FIM dengan kondisi file sistem yang sah saat ini (otomatis menutup temuan FIM pada file-file tersebut):
+     `ash
+     sudo -u shsm shsm integrity baseline --update
+     `
+  2. Tutup semua sisa finding peringatan lama yang masih OPEN:
+     `ash
+     sudo -u shsm shsm findings resolve all
+     `
+  3. Verifikasi status integritas:
+     `ash
+     sudo -u shsm shsm integrity check
+     sudo -u shsm shsm findings list
+     `
+
+---
+
 ## 3. Pemeriksaan Log SHSM
 
 Jika terjadi kejanggalan, pantau log utama SHSM:

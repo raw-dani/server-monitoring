@@ -121,6 +121,19 @@ def build_or_update_baseline(ctx: Context, paths: Optional[Set[str]] = None) -> 
 
     count = 0
     with ctx.db.transaction():
+        # Clean up stale baseline entries for files that no longer exist on disk when doing a full baseline update
+        if paths is None:
+            existing_baseline = ctx.integrity.baseline()
+            for old_p in existing_baseline:
+                if not os.path.exists(old_p) or old_p not in targets:
+                    ctx.integrity.delete_baseline(old_p)
+                    ctx.integrity.resolve_open_events_for_path(old_p, now)
+                    ctx.findings.resolve_by_asset(
+                        old_p,
+                        ["integrity.modified", "integrity.deleted", "integrity.permissions", "integrity.new_file", "integrity.accounts"],
+                        now,
+                    )
+
         for p in targets:
             rec = inspect_path(p, max_size)
             if rec:

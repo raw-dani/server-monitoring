@@ -54,6 +54,89 @@ def main(ctx: click.Context, config_path: Optional[str]) -> None:
     ctx.obj["config_path"] = config_path
 
 
+# ---------------------------------------------------------------- commands cheatsheet / guide
+@main.command("commands")
+@click.pass_context
+def cmd_commands(click_ctx: click.Context) -> None:
+    """Display comprehensive cheatsheet of all available SHSM commands with descriptions."""
+    click.secho("================================================================================", fg="cyan", bold=True)
+    click.secho(f" SHSM COMMANDS REFERENCE & CHEATSHEET (v{__version__})", fg="cyan", bold=True)
+    click.secho("================================================================================", fg="cyan", bold=True)
+    click.echo("Usage syntax: sudo -u shsm shsm <command> [subcommand] [options]\n")
+
+    categories = [
+        ("1. STATUS & DIAGNOSTICS", [
+            ("shsm status", "Show overall health & security scores, subsystem breakdown, and active issues."),
+            ("shsm status --json", "Output full server status in JSON format for APIs/external dashboards."),
+            ("shsm doctor", "Run self-diagnostics: SQLite WAL integrity, permissions, binaries, timers."),
+            ("shsm commands", "Show this commands reference list and quick guide."),
+        ]),
+        ("2. ACTIVE DEFENSE & IP BLOCKING", [
+            ("shsm blocked", "List all IPs and subnets currently blocked across Fail2Ban and iptables."),
+            ("shsm blocked <IP>", "Check if a specific IP or CIDR subnet is currently blocked."),
+            ("shsm ban <IP>", "Block offending IP address (Fail2Ban with automatic iptables fallback)."),
+            ("shsm ban <IP> --iptables", "Drop offending IP directly at kernel firewall layer (0% CPU OLS/PHP)."),
+            ("shsm unban <IP>", "Unban an IP address centrally from BOTH Fail2Ban and iptables."),
+            ("shsm block-scanners", "Scan access logs, aggregate 404s, and auto-drop scanner bot IPs in iptables."),
+            ("shsm block-scanners --dry-run", "Preview scanner bot IPs exceeding 404 threshold without blocking."),
+        ]),
+        ("3. FINDINGS & ISSUE MANAGEMENT", [
+            ("shsm findings list", "List active/open security and health findings."),
+            ("shsm findings list --status ALL", "List all historical findings (OPEN, RESOLVED, ACKNOWLEDGED)."),
+            ("shsm findings resolve <UID>", "Mark a specific finding as RESOLVED by its 12-char UID."),
+            ("shsm findings resolve all", "Close/resolve all currently active findings at once."),
+            ("shsm findings resolve all-malware", "Close/resolve all malware scan findings at once."),
+        ]),
+        ("4. WEBSITES & SSL MONITORING", [
+            ("shsm websites list", "Display registered domains, doc roots, latest HTTP status, and SSL days."),
+            ("shsm websites check", "Execute real-time DNS, HTTP/HTTPS response latency, and SSL check."),
+            ("shsm websites discover", "Auto-discover websites from CyberPanel database, OLS vhosts, and /home."),
+            ("shsm websites cleanup", "Batch remove dead/suspended websites and mail subdomains from inventory."),
+            ("shsm websites remove <domain>", "Remove a specific domain from active monitoring inventory."),
+        ]),
+        ("5. METRIC COLLECTORS (ON-DEMAND)", [
+            ("shsm collect health", "Collect CPU, RAM, swap, disk space, IO, and top process metrics."),
+            ("shsm collect services", "Audit status of systemd services (OLS, MariaDB, Redis, SSH, Cron)."),
+            ("shsm collect databases", "Check MariaDB connection pool, slow queries, and Redis latency/memory."),
+            ("shsm collect openlitespeed", "Parse OpenLiteSpeed access/error logs for 404 floods, 5xx, and exploits."),
+            ("shsm collect ddos", "Audit concurrent TCP connection sockets on port 80/443 per IP."),
+            ("shsm collect mail", "Inspect Postfix mail queue and detect unauthorized outbound SMTP connections."),
+        ]),
+        ("6. SECURITY AUDITS & SCANNERS", [
+            ("shsm security audit", "Run SSH configuration, auth logs, firewall status, and Fail2Ban audits."),
+            ("shsm security ols-ddos", "Audit OpenLiteSpeed anti-DDoS, client throttling, and challenge settings."),
+            ("shsm security rbl", "Check server public IP reputation against 6 major DNSBL/RBL spam blacklists."),
+            ("shsm security scan --profile quick", "Run quick heuristic malware & executable scan on web docroots."),
+            ("shsm security scan --profile full", "Run deep malware scan (heuristic, ClamAV, Lynis, and rootkit)."),
+        ]),
+        ("7. WORDPRESS SECURITY & INTEGRITY (FIM)", [
+            ("shsm wordpress discover", "Auto-discover WordPress installations in web document roots."),
+            ("shsm wordpress audit", "Audit WordPress core checksums, plugin/theme vulnerabilities, and admins."),
+            ("shsm integrity status", "Show file integrity baseline count and tracked critical system files."),
+            ("shsm integrity check", "Check system files (/etc/passwd, shadow, sudoers, sshd) against baseline."),
+            ("shsm integrity baseline", "Build or refresh file integrity baseline (admin action after updates)."),
+        ]),
+        ("8. REPORTS & SYSTEMD AUTOMATION", [
+            ("shsm report daily --preview", "Preview Daily Digest executive summary to terminal."),
+            ("shsm report daily --send", "Generate and email Daily Digest executive report with PDF attachment."),
+            ("shsm report weekly --send", "Generate and email Weekly executive report with PDF attachment."),
+            ("shsm report monthly --send", "Generate and email Monthly executive report with PDF attachment."),
+            ("shsm systemd install", "Generate, install, and enable all systemd service & timer unit files."),
+            ("shsm db backup", "Create a verified hot SQLite snapshot backup in /var/lib/shsm/backups."),
+            ("shsm email test", "Verify SMTP email connection and send a test email to default recipient."),
+        ]),
+    ]
+
+    for section_title, cmds in categories:
+        click.secho(section_title, fg="yellow", bold=True)
+        for cmd_name, desc in cmds:
+            click.echo(f"  {cmd_name:<36} : {desc}")
+        click.echo()
+
+    click.secho("--------------------------------------------------------------------------------", fg="cyan")
+    click.secho("Tip: Jalankan 'sudo -u shsm shsm <perintah> --help' untuk melihat opsi/argumen tiap perintah.", fg="green")
+
+
 # ---------------------------------------------------------------- status & doctor
 @main.command("status")
 @click.option("--json", "as_json", is_flag=True, help="Output status as JSON")
@@ -789,7 +872,29 @@ def cmd_external_send(click_ctx: click.Context) -> None:
 # ---------------------------------------------------------------- reports
 @main.group("report")
 def grp_report() -> None:
-    """Generate weekly and monthly reports."""
+    """Generate daily digest, weekly, and monthly reports."""
+
+
+@grp_report.command("daily")
+@click.option("--preview", is_flag=True, help="Print report text to terminal")
+@click.option("--send", is_flag=True, help="Generate and send report via email with PDF attached")
+@click.pass_context
+def cmd_report_daily(click_ctx: click.Context, preview: bool, send: bool) -> None:
+    """Generate daily digest HTML & PDF report."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.reporting.daily import generate_daily_report
+    html_p, pdf_p, r_id = generate_daily_report(app_ctx, send_email=send)
+    click.secho(f"Daily digest report generated (ID: {r_id}):", fg="green")
+    click.echo(f"  HTML: {html_p}")
+    click.echo(f"  PDF:  {pdf_p}")
+    if preview:
+        from shsm.core.timeutils import daily_period
+        from shsm.reporting.daily import assemble_daily_data
+        start, end = daily_period(app_ctx.now(), app_ctx.tz)
+        data = assemble_daily_data(app_ctx, start, end)
+        click.echo("-" * 60)
+        click.echo(f"Health: {data['health_score']:.1f}% | Security: {data['security_score']:.1f}%")
+        click.echo(f"Open Findings: {len(data['findings'])}")
 
 
 @grp_report.command("weekly")
@@ -1106,6 +1211,49 @@ def cmd_block_scanners(click_ctx: click.Context, threshold: int, log_file: Optio
         click.secho(f"\nDry-run completed. {len(targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
     else:
         click.secho(f"\nSuccessfully processed {len(targets)} IP(s) ({banned_count} newly blocked in iptables).", fg="green", bold=True)
+
+
+# ---------------------------------------------------------------- systemd unit generator
+@main.group("systemd")
+def grp_systemd() -> None:
+    """Manage systemd services and timers."""
+
+
+@grp_systemd.command("install")
+@click.option("--output-dir", default="/etc/systemd/system", help="Directory to write systemd unit files")
+@click.option("--reload", "do_reload", is_flag=True, default=True, help="Run systemctl daemon-reload and start timers")
+@click.pass_context
+def cmd_systemd_install(click_ctx: click.Context, output_dir: str, do_reload: bool) -> None:
+    """Generate and install all systemd service and timer unit files."""
+    import subprocess
+    from shsm.deploy.systemd import write_all_units
+
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
+    bin_path = str(app_ctx.runner.which("shsm") or "/opt/shsm/venv/bin/shsm")
+    cfg_path = str(click_ctx.obj.get("config_path") or "/etc/shsm/config.yaml")
+
+    click.echo(f"Generating systemd service and timer unit files in {output_dir}...")
+    try:
+        files = write_all_units(output_dir, bin_path=bin_path, cfg_path=cfg_path)
+        click.secho(f"Successfully generated {len(files)} unit file(s).", fg="green")
+    except Exception as exc:
+        click.secho(f"[ERROR] Failed to write unit files: {exc}", fg="red")
+        sys.exit(1)
+
+    if do_reload and os.path.isdir(output_dir) and output_dir.startswith("/etc/systemd"):
+        try:
+            subprocess.run(["systemctl", "daemon-reload"], check=True)
+            click.echo("Systemd daemon reloaded.")
+            # Enable and start timers
+            timer_count = 0
+            for f in files:
+                if f.endswith(".timer"):
+                    t_name = os.path.basename(f)
+                    subprocess.run(["systemctl", "enable", "--now", t_name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    timer_count += 1
+            click.secho(f"Enabled and started {timer_count} systemd timer(s).", fg="green", bold=True)
+        except Exception as exc:
+            click.secho(f"[WARNING] Could not reload systemd or enable timers: {exc}", fg="yellow")
 
 
 if __name__ == "__main__":

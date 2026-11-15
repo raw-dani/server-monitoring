@@ -54,6 +54,7 @@ DEFAULTS: Dict[str, Any] = {
         "from_name": "GM Teknologi Server Monitor",
         "from_address": "",
         "recipients": ["rohmataliwardani@gmail.com"],
+        "daily_recipients": [],
         "report_recipients": [],
         "weekly_recipients": [],
         "monthly_recipients": [],
@@ -64,6 +65,7 @@ DEFAULTS: Dict[str, Any] = {
     },
     "schedule": {
         "timezone": "Asia/Jakarta",
+        "daily_time": "07:00",
         "weekly_day": "monday",
         "weekly_time": "07:00",
         "monthly_day": 1,
@@ -298,6 +300,8 @@ DEFAULTS: Dict[str, Any] = {
     },
     "alerts": {
         "enabled": True,
+        "digest_mode": False,
+        "instant_check_ids": ["ssh.root_login"],
         "min_severity": "CRITICAL",
         "min_confidence": "MEDIUM",
         "cooldown_minutes": 60,
@@ -349,6 +353,7 @@ _RULES: List[Tuple[str, str, Optional[float], Optional[float], Optional[tuple]]]
     ("scanning.max_depth", "int", 1, 100, None),
     ("scanning.follow_symlinks", "bool", None, None, None),
     ("alerts.min_severity", "str", None, None, _SEVERITIES),
+    ("alerts.digest_mode", "bool", None, None, None),
     ("alerts.min_confidence", "str", None, None, _CONFIDENCES),
     ("alerts.cooldown_minutes", "int", 0, 10080, None),
     ("vulnerability.provider", "str", None, None, ("none", "wpscan")),

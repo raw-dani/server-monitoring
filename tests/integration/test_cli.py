@@ -42,3 +42,17 @@ def test_cli_db_commands(temp_dir, monkeypatch):
     res_status = runner.invoke(main, ["db", "status"])
     assert res_status.exit_code == 0
     assert "Integrity Check:  ok" in res_status.output
+
+
+def test_cli_commands():
+    runner = CliRunner()
+    result = runner.invoke(main, ["commands"])
+    assert result.exit_code == 0
+    assert "SHSM COMMANDS REFERENCE & CHEATSHEET" in result.output
+    assert "shsm status" in result.output
+    assert "shsm ban <IP>" in result.output
+    assert "shsm block-scanners" in result.output
+    assert "shsm findings resolve" in result.output
+    assert "shsm report daily --send" in result.output
+    assert "shsm systemd install" in result.output
+

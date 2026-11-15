@@ -16,62 +16,98 @@ SOURCE = "tls_socket"
 CATEGORY = "websites"
 
 
-def inspect_certificate(domain: str, port: int = 443, timeout: float = 10.0) -> Dict[str, Any]:
-    """Connect using TLS and extract certificate dates and validity."""
-    ctx = ssl.create_default_context()
-    try:
-        with socket.create_connection((domain, port), timeout=timeout) as raw_sock:
-            with ctx.wrap_socket(raw_sock, server_hostname=domain) as s:
-                cert = s.getpeercert()
-                if not cert:
+def inspect_certificate(
+    domain: str,
+    port: int = 443,
+    timeout: float = 10.0,
+    connect_host: str | None = None,
+    retries: int = 2,
+) -> Dict[str, Any]:
+    """Connect using TLS and extract certificate dates and validity.
+    
+    Supports retries on transient network/handshake timeouts, and SNI targeting
+    via connect_host (useful when running locally on the server or via specific IP).
+    """
+    target_host = connect_host or domain
+    last_error: Exception | None = None
+
+    for attempt in range(retries + 1):
+        ctx = ssl.create_default_context()
+        try:
+            with socket.create_connection((target_host, port), timeout=timeout) as raw_sock:
+                raw_sock.settimeout(timeout)
+                with ctx.wrap_socket(raw_sock, server_hostname=domain) as s:
+                    cert = s.getpeercert()
+                    if not cert:
+                        return {
+                            "domain": domain,
+                            "port": port,
+                            "valid": False,
+                            "error": "No certificate presented by server",
+                        }
+
+                    # Date format in python ssl getpeercert: 'May 10 12:00:00 2026 GMT'
+                    fmt = "%b %d %H:%M:%S %Y %Z"
+                    not_before_str = cert.get("notBefore")
+                    not_after_str = cert.get("notAfter")
+
+                    not_before = datetime.datetime.strptime(str(not_before_str), fmt).replace(tzinfo=UTC) if not_before_str else None
+                    not_after = datetime.datetime.strptime(str(not_after_str), fmt).replace(tzinfo=UTC) if not_after_str else None
+
+                    now = datetime.datetime.now(tz=UTC)
+                    if not_after:
+                        days_remaining = (not_after - now).total_seconds() / 86400.0
+                    else:
+                        days_remaining = None
+
+                    is_expired = days_remaining is not None and days_remaining <= 0
+
                     return {
                         "domain": domain,
                         "port": port,
-                        "valid": False,
-                        "error": "No certificate presented by server",
+                        "not_before": to_iso(not_before) if not_before else None,
+                        "not_after": to_iso(not_after) if not_after else None,
+                        "days_remaining": days_remaining,
+                        "valid": not is_expired,
+                        "error": "Certificate has expired" if is_expired else None,
                     }
+        except ssl.SSLCertVerificationError as exc:
+            # Certificate verification failure is definitive (expired, untrusted CA, domain mismatch)
+            return {
+                "domain": domain,
+                "port": port,
+                "valid": False,
+                "days_remaining": 0.0,
+                "error": f"Certificate verification failed: {exc.verify_message}",
+            }
+        except (socket.timeout, TimeoutError) as exc:
+            last_error = exc
+            # Transient handshake / connection timeout: retry before giving up
+            continue
+        except Exception as exc:
+            # Check for ssl timeout error messages (e.g., _ssl.c: handshake timeout)
+            err_msg = str(exc).lower()
+            if "timed out" in err_msg or "timeout" in err_msg:
+                last_error = exc
+                continue
+            return {
+                "domain": domain,
+                "port": port,
+                "valid": False,
+                "days_remaining": None,
+                "error": str(exc),
+            }
 
-                # Date format in python ssl getpeercert: 'May 10 12:00:00 2026 GMT'
-                fmt = "%b %d %H:%M:%S %Y %Z"
-                not_before_str = cert.get("notBefore")
-                not_after_str = cert.get("notAfter")
-
-                not_before = datetime.datetime.strptime(str(not_before_str), fmt).replace(tzinfo=UTC) if not_before_str else None
-                not_after = datetime.datetime.strptime(str(not_after_str), fmt).replace(tzinfo=UTC) if not_after_str else None
-
-                now = datetime.datetime.now(tz=UTC)
-                if not_after:
-                    days_remaining = (not_after - now).total_seconds() / 86400.0
-                else:
-                    days_remaining = None
-
-                is_expired = days_remaining is not None and days_remaining <= 0
-
-                return {
-                    "domain": domain,
-                    "port": port,
-                    "not_before": to_iso(not_before) if not_before else None,
-                    "not_after": to_iso(not_after) if not_after else None,
-                    "days_remaining": days_remaining,
-                    "valid": not is_expired,
-                    "error": "Certificate has expired" if is_expired else None,
-                }
-    except ssl.SSLCertVerificationError as exc:
-        return {
-            "domain": domain,
-            "port": port,
-            "valid": False,
-            "days_remaining": 0.0,
-            "error": f"Certificate verification failed: {exc.verify_message}",
-        }
-    except Exception as exc:
-        return {
-            "domain": domain,
-            "port": port,
-            "valid": False,
-            "days_remaining": None,
-            "error": str(exc),
-        }
+    err_str = str(last_error) if last_error else "Operation timed out"
+    is_timeout = isinstance(last_error, (socket.timeout, TimeoutError)) or "timeout" in err_str.lower() or "timed out" in err_str.lower()
+    return {
+        "domain": domain,
+        "port": port,
+        "valid": False,
+        "days_remaining": None,
+        "is_timeout": is_timeout,
+        "error": err_str,
+    }
 
 
 def collect(ctx: Context) -> CollectorOutput:
@@ -111,13 +147,36 @@ def collect(ctx: Context) -> CollectorOutput:
         days = r.get("days_remaining")
         valid = r.get("valid")
         err = r.get("error")
+        is_timeout = r.get("is_timeout", False)
 
         ctx.inventory.add_ssl(domain, port, now, r.get("not_before"), r.get("not_after"), days, valid, err)
 
         if days is not None:
             out.metric("ssl.days_remaining", days, asset=domain)
 
-        if not valid or (days is not None and days <= 0):
+        # Distinguish between network / handshake timeouts and actual certificate invalidity / expiration
+        if is_timeout:
+            out.check(
+                "ssl.certificate",
+                CATEGORY,
+                CheckStatus.WARNING,
+                f"SSL probe for {domain} timed out during handshake ({err})",
+                asset=domain,
+                source=SOURCE,
+            )
+            out.finding(
+                "ssl.certificate",
+                CATEGORY,
+                Severity.MEDIUM,
+                Confidence.LOW,
+                f"TLS handshake timed out for {domain}",
+                f"TLS connection to {domain}:{port} timed out during handshake: {err}. This is usually caused by network latency, rate limiting, or firewall rules rather than an invalid certificate.",
+                "Verify network connectivity and firewall rate limits to port 443. The certificate itself may still be valid.",
+                asset=domain,
+                source=SOURCE,
+                key=domain,
+            )
+        elif not valid or (days is not None and days <= 0):
             out.check(
                 "ssl.certificate",
                 CATEGORY,

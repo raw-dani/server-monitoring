@@ -142,6 +142,47 @@ def collect(ctx: Context) -> CollectorOutput:
         out.metric("ssh.successful_logins", successes)
         out.metric("ssh.root_logins", roots)
 
+        # Immediate root login detection
+        if roots > 0:
+            whitelist_cfg = set(ctx.config.get("security.root_login_whitelist", []))
+            whitelist_cfg.update(ctx.config.get("security.ip_whitelist", []))
+
+            # Filter out root logins from whitelisted administrator IPs
+            unauthorized_root_ips = [
+                r_ip for r_ip in auth_data["root_logins"]
+                if r_ip not in whitelist_cfg and not r_ip.startswith("127.")
+            ]
+
+            if unauthorized_root_ips:
+                root_ips = ", ".join(unauthorized_root_ips)
+                out.check(
+                    "ssh.root_login",
+                    CATEGORY,
+                    CheckStatus.CRITICAL,
+                    f"SSH root login detected from: {root_ips}",
+                    source=SOURCE,
+                )
+                out.finding(
+                    "ssh.root_login",
+                    CATEGORY,
+                    Severity.CRITICAL,
+                    Confidence.CONFIRMED,
+                    f"SSH root login detected from {root_ips}",
+                    f"An accepted SSH session for user 'root' was detected from IP(s): {root_ips}. Unauthorized root access presents severe system security risks.",
+                    "Verify whether this root session was authorized. If unexpected, investigate bash history, check active sessions (w/who), revoke compromised SSH keys, and consider disabling PermitRootLogin in /etc/ssh/sshd_config.",
+                    asset=root_ips,
+                    source=SOURCE,
+                    key=f"root_login_{root_ips}",
+                )
+            else:
+                out.check(
+                    "ssh.root_login",
+                    CATEGORY,
+                    CheckStatus.PASS,
+                    f"Authorized SSH root login from whitelisted IP(s): {', '.join(auth_data['root_logins'])}",
+                    source=SOURCE,
+                )
+
         warn_fail = ctx.threshold("ssh_failed_warning")
         crit_fail = ctx.threshold("ssh_failed_critical")
 

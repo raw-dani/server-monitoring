@@ -24,6 +24,7 @@ class JobDef:
 def build_jobs(schedule: Optional[Dict[str, Any]] = None) -> List[JobDef]:
     s = schedule or {}
     tz = s.get("timezone", "Asia/Jakarta")
+    dtime = s.get("daily_time", "07:00")
     weekday = str(s.get("weekly_day", "monday")).capitalize()[:3]
     wtime = s.get("weekly_time", "07:00")
     mday = int(s.get("monthly_day", 1))
@@ -74,6 +75,8 @@ def build_jobs(schedule: Optional[Dict[str, Any]] = None) -> List[JobDef]:
                timeout_seconds=5400),
         JobDef("heartbeat", ["external", "send"], "*-*-* *:0/5:45", "External heartbeat", root=True,
                max_age_seconds=1200, timeout_seconds=120),
+        JobDef("report-daily", ["report", "daily", "--send"], f"*-*-* {dtime}:00 {tz}",
+               "Daily digest HTML/PDF report", root=True, max_age_seconds=2 * 86400, timeout_seconds=900),
         JobDef("report-weekly", ["report", "weekly", "--send"], f"{weekday} *-*-* {wtime}:00 {tz}",
                "Weekly HTML/PDF report", root=True, max_age_seconds=9 * 86400, timeout_seconds=900),
         JobDef("report-monthly", ["report", "monthly", "--send"], f"*-*-{mday:02d} {mtime}:00 {tz}",

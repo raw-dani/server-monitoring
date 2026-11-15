@@ -303,11 +303,20 @@ sudo -u shsm shsm external send
 
 ---
 
-## 8. Laporan Berkala (Weekly & Monthly Reports)
+## 8. Laporan Berkala (Daily Digest, Weekly & Monthly Reports)
+
+### Membuat Laporan Daily Digest (Rekap Harian)
+```bash
+# Pratinjau lokal ke terminal (membuat file HTML & PDF di /var/lib/shsm/reports/daily/)
+sudo -u shsm shsm report daily --preview
+
+# Buat laporan rekap harian dan kirimkan via email dengan lampiran PDF
+sudo -u shsm shsm report daily --send
+```
 
 ### Membuat Laporan Mingguan
 ```bash
-# Pratinjau lokal (membuat file HTML & PDF di /var/lib/shsm/reports/)
+# Pratinjau lokal (membuat file HTML & PDF di /var/lib/shsm/reports/weekly/)
 sudo -u shsm shsm report weekly --preview
 
 # Buat laporan dan kirimkan via email dengan lampiran PDF

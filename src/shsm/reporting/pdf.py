@@ -2,8 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Any, Dict
+
+# Fix for Python <= 3.8 and specific OpenSSL environments where ReportLab calls
+# hashlib.md5(usedforsecurity=False) but openssl_md5() does not accept keyword arguments.
+try:
+    hashlib.md5(b"test", usedforsecurity=False)
+except TypeError:
+    _orig_md5 = hashlib.md5
+
+    def _compat_md5(*args, **kwargs):
+        kwargs.pop("usedforsecurity", None)
+        return _orig_md5(*args, **kwargs)
+
+    hashlib.md5 = _compat_md5  # type: ignore[assignment]
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter

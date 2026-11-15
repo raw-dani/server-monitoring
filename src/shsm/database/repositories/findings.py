@@ -30,19 +30,31 @@ class FindingsRepo:
         fp = cand.fingerprint
         row = self.db.query_one("SELECT id, status, severity FROM findings WHERE fingerprint=?", (fp,))
         details = json.dumps(cand.details, default=str, sort_keys=True)
+        init_st = cand.initial_status.value
+        init_resolved_at = ts if cand.initial_status == FindingStatus.RESOLVED else None
+        init_note = cand.status_note or None
+
         if row is None:
             cur = self.db.execute(
                 "INSERT INTO findings (uid, fingerprint, category, check_id, component, asset, severity, confidence, "
-                "status, title, evidence, recommendation, source, first_seen, last_seen, details_json, status_changed_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "status, title, evidence, recommendation, source, first_seen, last_seen, details_json, status_changed_at, "
+                "resolved_at, status_note) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uuid.uuid4().hex[:12], fp, cand.category, cand.check_id, component_for(cand.check_id), cand.asset,
-                 cand.severity.value, cand.confidence.value, FindingStatus.OPEN.value, cand.title, cand.evidence,
-                 cand.recommendation, cand.source, ts, ts, details, ts),
+                 cand.severity.value, cand.confidence.value, init_st, cand.title, cand.evidence,
+                 cand.recommendation, cand.source, ts, ts, details, ts, init_resolved_at, init_note),
             )
             return int(cur.lastrowid or 0), "NEW"
         event = "UPDATED"
         status = row["status"]
-        if status == FindingStatus.RESOLVED.value:
+        if cand.initial_status == FindingStatus.RESOLVED:
+            # If candidate specifies resolved status (e.g. auto-blocked defense), ensure it is marked resolved
+            self.db.execute(
+                "UPDATE findings SET status='RESOLVED', resolved_at=COALESCE(resolved_at, ?), status_note=?, "
+                "status_changed_at=? WHERE id=?",
+                (ts, init_note, ts, row["id"]),
+            )
+        elif status == FindingStatus.RESOLVED.value:
             self.db.execute(
                 "UPDATE findings SET status='OPEN', resolved_at=NULL, reopen_count=reopen_count+1, status_changed_at=? WHERE id=?",
                 (ts, row["id"]),

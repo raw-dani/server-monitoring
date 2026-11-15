@@ -139,6 +139,72 @@ In CyberPanel / OpenLiteSpeed WebAdmin Console:
 3. Set **Banning Period (secs)** (e.g., 60-300).
 4. Under **reCaptcha / Bot Verification**, enable the Anti-DDoS challenge. Legitimate web browsers will execute JavaScript and pass seamlessly, while headless bot scripts (curl, python, flooders) are instantly dropped with HTTP 403.
 
+---
+
+## 11. Scanner Bot Detection (404/403) & Instant IP Blocking
+
+Aggressive web vulnerability scanners and botnets repeatedly probe random paths, exploit URIs, and endpoints, producing massive spikes of HTTP 404 (Not Found) or 403 (Forbidden) responses. These requests consume web server file handles and spawn unnecessary PHP workers.
+
+### A. Instant Detection & Ban using SHSM (`block-scanners`)
+
+SHSM provides a built-in automated scanner blocker that reads access logs, computes per-IP error counts, skips whitelist/internal IPs, and drops offending IPs at the Linux kernel packet filter layer (`iptables DROP`).
+
+```bash
+# 1. Preview / Dry-Run (Check which IPs exceed threshold without banning)
+sudo -u shsm shsm block-scanners --threshold 10 --dry-run
+
+# 2. Execute Instant Ban (Drops all IPs exceeding threshold directly in iptables)
+sudo -u shsm shsm block-scanners --threshold 10
+```
+
+> **Catatan:** Nilai `--threshold` menentukan batas minimal jumlah request error untuk memicu pemblokiran (misal `--threshold 10` atau `--threshold 30`).
+
+### B. Real-Time Inspection via Shell / AWK
+
+Untuk melihat daftar IP yang sedang aktif mengakses halaman 404 atau 403 beserta jumlah request-nya:
+
+```bash
+# Top 20 IP penghasil status 404 (Not Found)
+awk '($9 ~ /404/) {print $1}' /usr/local/lsws/logs/access.log | sort | uniq -c | sort -rn | head -20
+
+# Top 20 IP penghasil status 403 (Forbidden)
+awk '($9 ~ /403/) {print $1}' /usr/local/lsws/logs/access.log | sort | uniq -c | sort -rn | head -20
+
+# Gabungan Top 20 IP untuk 404 DAN 403 sekaligus
+awk '($9 ~ /404|403/) {print $1}' /usr/local/lsws/logs/access.log | sort | uniq -c | sort -rn | head -20
+```
+
+### C. Manual & Batch Ban Operations
+
+Jika ingin memblokir IP tertentu atau memblokir hasil ekstraksi log secara massal:
+
+```bash
+# 1. Blokir IP tunggal ke firewall kernel (0% CPU impact ke OLS/PHP)
+sudo -u shsm shsm ban <IP> --iptables
+
+# 2. Blokir massal semua IP dengan hit 404/403 >= 20 kali secara otomatis
+awk '($9 ~ /404|403/) {print $1}' /usr/local/lsws/logs/access.log \
+  | sort | uniq -c | sort -rn \
+  | awk '$1 >= 20 {print $2}' \
+  | while read ip; do
+      sudo -u shsm shsm ban "$ip" --iptables
+    done
+```
+
+### D. Audit & Unban
+
+```bash
+# Melihat seluruh daftar IP dan subnet yang saat ini diblokir
+sudo -u shsm shsm blocked
+
+# Memeriksa status blokir IP tertentu
+sudo -u shsm shsm blocked <IP>
+
+# Membuka blokir IP (menghapus dari Fail2Ban dan iptables sekaligus)
+sudo -u shsm shsm unban <IP>
+```
+
+
 ### 4. ConfigServer Security & Firewall (CSF / LFD)
 Jika server menggunakan CSF/LFD (misal di lingkungan CyberPanel):
 - **LFD (Login Failure Daemon)** menggantikan fungsi Fail2Ban untuk memitigasi brute-force SSH, FTP, dan webmail.
