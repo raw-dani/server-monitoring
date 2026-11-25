@@ -11,13 +11,14 @@ Detects:
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import psutil
 
 from shsm.collectors.base import threshold_result
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus, CollectorOutput, Confidence, Severity
+from shsm.security.blocked import ban_ip_unified, get_protected_whitelist, is_protected_ip
 from shsm.utils.redact import mask_ip
 
 SOURCE = "ddos_detector"
@@ -36,7 +37,7 @@ def analyze_tcp_connections(
     """
     conn_warn = int(ctx.config.get("thresholds.ddos_ip_conns_warning", 50))
     conn_crit = int(ctx.config.get("thresholds.ddos_ip_conns_critical", 150))
-    whitelist = set(ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
+    whitelist = get_protected_whitelist(ctx)
 
     try:
         conns = psutil.net_connections(kind="tcp")
@@ -62,7 +63,7 @@ def analyze_tcp_connections(
         if c.status in (psutil.CONN_ESTABLISHED, psutil.CONN_SYN_RECV, psutil.CONN_CLOSE_WAIT):
             if c.raddr:
                 r_ip = c.raddr.ip if hasattr(c.raddr, "ip") else str(c.raddr[0])
-                if r_ip not in whitelist and not r_ip.startswith("127."):
+                if not is_protected_ip(ctx, r_ip, whitelist)[0]:
                     ip_counter[r_ip] += 1
 
     top_violators: List[Dict[str, Any]] = []
@@ -119,9 +120,24 @@ def collect(ctx: Context) -> CollectorOutput:
         status = CheckStatus.CRITICAL if crit_violators else CheckStatus.WARNING
         sev = Severity.CRITICAL if crit_violators else Severity.MEDIUM
 
+        auto_block = bool(ctx.config.get("security.ddos_auto_block", True))
+        mitigated_ips: List[str] = []
+        if auto_block:
+            targets_to_ban = crit_violators if crit_violators else violators
+            for v in targets_to_ban[:20]:
+                ok_ban, msg_ban = ban_ip_unified(
+                    ctx,
+                    v["ip"],
+                    use_iptables=True,
+                    reason=f"L4 socket flood ({v['connections']} conns)",
+                )
+                if ok_ban:
+                    mitigated_ips.append(f"{v['masked_ip']} ({msg_ban})")
+
         summary_parts = [f"{v['masked_ip']}: {v['connections']} conns" for v in violators]
         summary_str = ", ".join(summary_parts)
         sample_ip = violators[0]["ip"] if len(violators) == 1 else "TARGET_IP"
+        mitigation_note = f" Auto-mitigated: {'; '.join(mitigated_ips)}." if mitigated_ips else ""
 
         out.finding(
             "ddos.conns",
@@ -129,7 +145,7 @@ def collect(ctx: Context) -> CollectorOutput:
             sev,
             Confidence.HIGH,
             f"Detected {len(violators)} IP(s) conducting concurrent connection flood on web ports",
-            f"Active violators: {summary_str}. Total concurrent web connections: {total_web_conns}.",
+            f"Active violators: {summary_str}. Total concurrent web connections: {total_web_conns}.{mitigation_note}",
             f"Drop the attacking IP addresses immediately: 'shsm ban {sample_ip} --iptables' or 'iptables -I INPUT -s {sample_ip} -j DROP'. "
             "Ensure OpenLiteSpeed perClientConnLimit is enforced.",
             asset="ports_80_443",
@@ -140,7 +156,7 @@ def collect(ctx: Context) -> CollectorOutput:
             "ddos.conns",
             CATEGORY,
             status,
-            f"DDoS connection flood detected: {len(violators)} suspicious IP(s) ({summary_str})",
+            f"DDoS connection flood detected: {len(violators)} suspicious IP(s) ({summary_str}){mitigation_note}",
             asset="ports_80_443",
             source=SOURCE,
         )

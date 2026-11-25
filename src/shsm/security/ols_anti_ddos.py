@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus, CollectorOutput, Confidence, Severity
@@ -23,50 +23,63 @@ DEFAULT_OLS_CONFIG = "/usr/local/lsws/conf/httpd_config.conf"
 
 
 def parse_ols_tuning_and_ddos(config_path: str) -> Dict[str, Any]:
-    """Parse OLS server configuration for perClientConnLimit and anti-DDoS settings."""
+    """Parse OLS server configuration for perClientConnLimit (flat & block syntax) and anti-DDoS settings."""
     settings: Dict[str, Any] = {
         "found": False,
         "per_client_conn_limit": None,
+        "dyn_req_per_sec": None,
         "grace_period": None,
         "ban_period": None,
         "anti_ddos_enabled": False,
         "recaptcha_enabled": False,
+        "max_php_conns": None,
     }
 
     if not os.path.isfile(config_path):
         return settings
 
     try:
-        with open(config_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(config_path, encoding="utf-8", errors="replace") as f:
             content = f.read()
     except (OSError, PermissionError):
         return settings
 
     settings["found"] = True
 
-    # Look for perClientConnLimit or hardLimit/softLimit (OLS tuning syntax variants)
+    # Support nested OLS block: perClientConnLimit { ... hardLimit 100 ... }
+    block_match = re.search(r"perClientConnLimit\s*\{([^}]*)\}", content, re.DOTALL)
+    block_body = block_match.group(1) if block_match else content
+
+    # Look for perClientConnLimit <int> or hardLimit/softLimit inside block
     m_limit = re.search(r"perClientConnLimit\s+(\d+)", content)
     if m_limit:
         settings["per_client_conn_limit"] = int(m_limit.group(1))
     else:
-        m_hard = re.search(r"hardLimit\s+(\d+)", content)
+        m_hard = re.search(r"hardLimit\s+(\d+)", block_body)
         if m_hard:
             settings["per_client_conn_limit"] = int(m_hard.group(1))
 
-    # Look for gracePeriod and banPeriod
-    m_grace = re.search(r"gracePeriod\s+(\d+)", content)
+    m_dyn = re.search(r"dynReqPerSec\s+(\d+)", block_body)
+    if m_dyn:
+        settings["dyn_req_per_sec"] = int(m_dyn.group(1))
+
+    m_grace = re.search(r"gracePeriod\s+(\d+)", block_body)
     if m_grace:
         settings["grace_period"] = int(m_grace.group(1))
 
-    m_ban = re.search(r"banPeriod\s+(\d+)", content)
+    m_ban = re.search(r"banPeriod\s+(\d+)", block_body)
     if m_ban:
         settings["ban_period"] = int(m_ban.group(1))
 
     # Look for reCaptcha or anti-DDoS challenge block
-    # In OLS: reCaptcha { enabled 1 } or similar antiDDoS directives
     if re.search(r"(?i)reCaptcha\s*\{[^}]*enabled\s+1", content) or "antiDDoS" in content:
         settings["recaptcha_enabled"] = True
         settings["anti_ddos_enabled"] = True
+
+    # Inspect maxConns in lsphp extProcessor definitions to catch worker exhaustion
+    php_conns = [int(x) for x in re.findall(r"(?i)lsphp[^\n]*\n(?:[^\}]*\n)*?\s*maxConns\s+(\d+)", content)]
+    if php_conns:
+        settings["max_php_conns"] = max(php_conns)
 
     return settings
 
@@ -111,6 +124,17 @@ def scan(ctx: Context) -> CollectorOutput:
 
     if not parsed["ban_period"] or parsed["ban_period"] == 0:
         issues.append("banPeriod is not configured or disabled (temporary auto-ban disabled)")
+
+    dyn_rps = parsed.get("dyn_req_per_sec")
+    if dyn_rps is not None and (dyn_rps == 0 or dyn_rps > 30):
+        issues.append(f"dynReqPerSec is permissive ({dyn_rps} req/s), allowing PHP worker flooding")
+
+    max_php = parsed.get("max_php_conns")
+    cpu_cnt = os.cpu_count() or 4
+    if max_php is not None and max_php > cpu_cnt * 4:
+        issues.append(
+            f"lsphp maxConns ({max_php}) exceeds safe limit ({cpu_cnt * 4} for {cpu_cnt} cores), risking CPU thrashing"
+        )
 
     if issues:
         desc = "; ".join(issues)

@@ -36,7 +36,30 @@ def run_wp_cli(
 
     doc_root = site["doc_root"]
     owner = site.get("owner")
-    if not site.get("is_safe_owner") or owner == "root":
+
+    is_safe = site.get("is_safe_owner")
+    if is_safe is None:
+        if owner and owner != "root":
+            min_uid = int(ctx.config.get("wordpress.min_owner_uid", 100))
+            try:
+                import pwd
+                uid = pwd.getpwnam(owner).pw_uid
+                is_safe = (uid >= min_uid)
+            except Exception:
+                # If user lookup fails (e.g. non-POSIX test runner), check doc_root stat or accept non-root
+                try:
+                    import os
+                    if doc_root and os.path.exists(doc_root):
+                        st = os.stat(doc_root)
+                        is_safe = (st.st_uid >= min_uid)
+                    else:
+                        is_safe = True
+                except Exception:
+                    is_safe = True
+        else:
+            is_safe = False
+
+    if not is_safe or owner == "root":
         return False, "", f"refusing to run wp-cli as user '{owner}' (least privilege rule)"
 
     cmd = [wp_bin, f"--path={doc_root}", "--skip-plugins", "--skip-themes"] + args

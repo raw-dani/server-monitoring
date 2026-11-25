@@ -1,0 +1,22 @@
+[Unit]
+Description=SHSM Real-Time Adaptive Anti-DDoS & L7 Flood Watcher
+Documentation=https://github.com/gmteknologi/shsm
+After=network.target local-fs.target
+
+[Service]
+Type=simple
+User=shsm
+Group=shsm
+ExecStart=/opt/shsm/venv/bin/shsm --config /etc/shsm/config.yaml watch
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Nice=-5
+CPUQuota=15%
+MemoryHigh=96M
+MemoryMax=128M
+IOWeight=100
+
+[Install]
+WantedBy=multi-user.target

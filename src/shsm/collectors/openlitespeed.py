@@ -1,24 +1,31 @@
-"""OpenLiteSpeed monitoring: process metrics and incremental log parsing."""
+"""OpenLiteSpeed monitoring: process metrics and incremental multi-vhost log parsing."""
 
 from __future__ import annotations
 
+import glob
 import os
 import re
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
 try:
     import psutil
 except ImportError:
-    psutil = None
+    psutil = None  # type: ignore[assignment]
 
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus, CollectorOutput, Confidence, Severity
+from shsm.security import blocked
+from shsm.security.blocked import get_protected_whitelist, is_protected_ip
 
 SOURCE = "openlitespeed"
 CATEGORY = "health"
 
-# Regex patterns for OpenLiteSpeed access and error logs
+# Regex patterns for OpenLiteSpeed access and error logs.
+# Supports both standard combined format and CyberPanel's outer-quoted format ("1.2.3.4 ...").
 _ACCESS_LOG_LINE = re.compile(
-    r'^(?P<ip>\S+) \S+ \S+ \[[^\]]+\] "(?P<method>\S+) (?P<path>\S+)[^"]*" (?P<status>\d{3}) (?P<bytes>\S+)'
+    r'^"?(?P<ip>[^\s"]+) \S+ \S+ \[[^\]]+\] "(?P<method>\S+) (?P<path>\S+)[^"]*" (?P<status>\d{3}) (?P<bytes>\S+)'
+    r'(?:\s+"(?P<referer>[^"]*)"\s+"(?P<ua>[^"]*)")?'
 )
 
 _PHP_FATAL = re.compile(r"(?i)PHP Fatal error|PHP Parse error|Uncaught Error")
@@ -33,6 +40,15 @@ _EXPLOIT_URI_PATTERN = re.compile(
     r"|\b(?:c99|r57|b374k|wso|alfa|php2shell|webshell|cmd\.php|shell\.php)\b)"
 )
 _EXPLOIT_HINTS = ("php", "phtml", "pht", "data:", "c99", "r57", "b374k", "wso", "alfa", "shell")
+
+# High-cost WordPress / dynamic endpoints often abused in Layer-7 floods
+_HIGH_COST_URI_PATTERN = re.compile(
+    r"(?i)(?:/wp-login\.php|/xmlrpc\.php|/wp-json/|/wp-admin/admin-ajax\.php)"
+)
+_STATIC_EXT_PATTERN = re.compile(
+    r"(?i)\.(?:css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|map)(?:\?.*)?$"
+)
+_DEFAULT_BAD_BOTS = ("riverbot", "keenablebot", "bytespider", "petalbot")
 
 
 def collect_process_metrics(ctx: Context, out: CollectorOutput) -> None:
@@ -68,20 +84,38 @@ def collect_process_metrics(ctx: Context, out: CollectorOutput) -> None:
     out.metric("openlitespeed.cpu_percent", 0.0)
 
 
-def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
+def parse_access_lines(
+    lines: List[str],
+    bad_bot_agents: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
     total_reqs = len(lines)
     status_counts: Dict[str, int] = {"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0, "other": 0}
     c_5xx = 0
     c_4xx = 0
     suspicious_requests: List[Dict[str, str]] = []
     ip_404_counts: Dict[str, int] = {}
+    ip_dynamic_counts: Dict[str, int] = {}
+    ip_auth_err_counts: Dict[str, int] = {}
+    ip_high_cost_counts: Dict[str, int] = {}
+    ip_bad_bot_counts: Dict[str, int] = {}
+
+    bot_tokens = tuple(
+        str(b).lower() for b in (bad_bot_agents if bad_bot_agents is not None else _DEFAULT_BAD_BOTS) if str(b).strip()
+    )
 
     for line in lines:
+        if "SHSM-Monitor" in line:
+            continue
         m = _ACCESS_LOG_LINE.search(line)
         if m:
             code = m.group("status")
             path = m.group("path")
-            ip = m.group("ip")
+            method = (m.group("method") or "GET").upper()
+            ip = (m.group("ip") or "").strip('"')
+            ua = (m.group("ua") or "").lower()
+            if not ip:
+                continue
+
             first_c = code[0] if code else ""
             if first_c == "2":
                 status_counts["2xx"] += 1
@@ -90,14 +124,27 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
             elif first_c == "4":
                 status_counts["4xx"] += 1
                 c_4xx += 1
-                if code == "404" and ip:
-                    if "SHSM-Monitor" not in line:
-                        ip_404_counts[ip] = ip_404_counts.get(ip, 0) + 1
+                if code == "404":
+                    ip_404_counts[ip] = ip_404_counts.get(ip, 0) + 1
+                elif code in ("401", "403"):
+                    ip_auth_err_counts[ip] = ip_auth_err_counts.get(ip, 0) + 1
             elif first_c == "5":
                 status_counts["5xx"] += 1
                 c_5xx += 1
+                if code == "503":
+                    ip_auth_err_counts[ip] = ip_auth_err_counts.get(ip, 0) + 1
             else:
                 status_counts["other"] += 1
+
+            is_static = bool(_STATIC_EXT_PATTERN.search(path))
+            if not is_static:
+                ip_dynamic_counts[ip] = ip_dynamic_counts.get(ip, 0) + 1
+
+            if _HIGH_COST_URI_PATTERN.search(path) or (method == "POST" and not is_static):
+                ip_high_cost_counts[ip] = ip_high_cost_counts.get(ip, 0) + 1
+
+            if bot_tokens and ua and any(tok in ua for tok in bot_tokens):
+                ip_bad_bot_counts[ip] = ip_bad_bot_counts.get(ip, 0) + 1
 
             path_lower = path.lower()
             if any(h in path_lower for h in _EXPLOIT_HINTS) and _EXPLOIT_URI_PATTERN.search(path):
@@ -110,7 +157,131 @@ def parse_access_lines(lines: List[str]) -> Dict[str, Any]:
         "counts": status_counts,
         "suspicious": suspicious_requests,
         "ip_404_counts": ip_404_counts,
+        "ip_dynamic_counts": ip_dynamic_counts,
+        "ip_auth_err_counts": ip_auth_err_counts,
+        "ip_high_cost_counts": ip_high_cost_counts,
+        "ip_bad_bot_counts": ip_bad_bot_counts,
     }
+
+
+def merge_access_stats(acc_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge multiple parse_access_lines dictionaries across global and vhost logs."""
+    merged: Dict[str, Any] = {
+        "total": 0,
+        "5xx": 0,
+        "4xx": 0,
+        "counts": {"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0, "other": 0},
+        "suspicious": [],
+        "ip_404_counts": {},
+        "ip_dynamic_counts": {},
+        "ip_auth_err_counts": {},
+        "ip_high_cost_counts": {},
+        "ip_bad_bot_counts": {},
+    }
+    for acc in acc_list:
+        merged["total"] += acc.get("total", 0)
+        merged["5xx"] += acc.get("5xx", 0)
+        merged["4xx"] += acc.get("4xx", 0)
+        for k, v in acc.get("counts", {}).items():
+            merged["counts"][k] = merged["counts"].get(k, 0) + v
+        merged["suspicious"].extend(acc.get("suspicious", []))
+        for map_key in (
+            "ip_404_counts", "ip_dynamic_counts", "ip_auth_err_counts",
+            "ip_high_cost_counts", "ip_bad_bot_counts",
+        ):
+            dst = merged[map_key]
+            for ip, cnt in acc.get(map_key, {}).items():
+                dst[ip] = dst.get(ip, 0) + cnt
+    return merged
+
+
+def discover_active_access_logs(ctx: Context, active_window_seconds: Optional[int] = None) -> List[str]:
+    """Discover global and recently-active CyberPanel vhost access logs with O(1) stat filtering."""
+    logs: List[str] = []
+    seen = set()
+
+    primary_log = str(ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
+    if primary_log and os.path.exists(primary_log):
+        logs.append(primary_log)
+        seen.add(os.path.abspath(primary_log))
+
+    if not bool(ctx.config.get("openlitespeed.scan_vhost_logs", True)):
+        return logs
+
+    globs = ctx.config.get("openlitespeed.vhost_log_globs", ["/home/*/logs/*.access_log"])
+    max_logs = int(ctx.config.get("openlitespeed.max_vhost_logs", 200))
+    win = int(ctx.config.get("openlitespeed.vhost_active_window_seconds", 300)) if active_window_seconds is None else active_window_seconds
+    cutoff = time.time() - win if win > 0 else 0.0
+
+    candidates: List[Tuple[float, str]] = []
+    for pattern in globs:
+        if "error" in str(pattern).lower():
+            continue
+        for p in glob.glob(str(pattern)):
+            abs_p = os.path.abspath(p)
+            if abs_p in seen:
+                continue
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if st.st_size == 0:
+                continue
+            if cutoff > 0 and st.st_mtime < cutoff:
+                continue
+            seen.add(abs_p)
+            candidates.append((st.st_mtime, p))
+
+    # Process most recently active vhosts first, capped to max_logs
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    logs.extend(p for _, p in candidates[:max_logs])
+    return logs
+
+
+def find_l7_offenders(
+    ctx: Context,
+    acc_info: Dict[str, Any],
+    burst_threshold: Optional[int] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Evaluate parsed access metrics against L7 flood, high-cost, auth-error, and bad-bot thresholds."""
+    wl = get_protected_whitelist(ctx)
+    burst_lim = int(ctx.config.get("security.l7_burst_threshold", 150)) if burst_threshold is None else burst_threshold
+    high_cost_lim = int(ctx.config.get("security.l7_high_cost_threshold", 20))
+    auth_err_lim = int(ctx.config.get("security.l7_auth_error_threshold", 30))
+    check_bots = bool(ctx.config.get("security.bad_bot_auto_block", True))
+
+    offenders: Dict[str, Dict[str, Any]] = {}
+
+    def _record(ip: str, reason: str, count: int) -> None:
+        prot, _ = is_protected_ip(ctx, ip, wl)
+        if prot:
+            return
+        cur = offenders.get(ip)
+        if cur is None:
+            offenders[ip] = {"ip": ip, "reasons": [reason], "max_hits": count}
+        else:
+            cur["reasons"].append(reason)
+            if count > cur["max_hits"]:
+                cur["max_hits"] = count
+
+    for ip, cnt in acc_info.get("ip_dynamic_counts", {}).items():
+        if burst_lim > 0 and cnt >= burst_lim:
+            _record(ip, f"L7 burst ({cnt} dynamic reqs)", cnt)
+
+    for ip, cnt in acc_info.get("ip_high_cost_counts", {}).items():
+        if high_cost_lim > 0 and cnt >= high_cost_lim:
+            _record(ip, f"High-cost/POST flood ({cnt} hits)", cnt)
+
+    for ip, cnt in acc_info.get("ip_auth_err_counts", {}).items():
+        if auth_err_lim > 0 and cnt >= auth_err_lim:
+            _record(ip, f"401/403/503 flood ({cnt} hits)", cnt)
+
+    if check_bots:
+        for ip, cnt in acc_info.get("ip_bad_bot_counts", {}).items():
+            if cnt >= 3:
+                _record(ip, f"Blocked bot scraper ({cnt} hits)", cnt)
+
+    return offenders
 
 
 def parse_error_lines(lines: List[str]) -> Dict[str, int]:
@@ -152,18 +323,25 @@ def collect(ctx: Context) -> CollectorOutput:
     error_log = str(ctx.config.get("openlitespeed.error_log", "/usr/local/lsws/logs/error.log"))
     max_bytes = int(ctx.config.get("openlitespeed.max_bytes_per_run", 5 * 1024 * 1024))
     max_lines = int(ctx.config.get("openlitespeed.max_lines_per_run", 50000))
+    bad_bots = ctx.config.get("security.bad_bot_user_agents", list(_DEFAULT_BAD_BOTS))
 
-    if not os.path.exists(access_log) and not os.path.exists(error_log):
+    active_access_logs = discover_active_access_logs(ctx)
+    if not active_access_logs and not os.path.exists(access_log) and not os.path.exists(error_log):
         if enabled is True:
             out.check("openlitespeed.logs", CATEGORY, CheckStatus.ERROR, f"OpenLiteSpeed logs not found at {access_log}", source=SOURCE)
         else:
             out.check("openlitespeed.logs", CATEGORY, CheckStatus.NOT_APPLICABLE, "OpenLiteSpeed logs not found", source=SOURCE)
         return out
 
-    # 1. Access log parsing
-    tail_access = ctx.tailer.read_new(access_log, now, max_bytes=max_bytes, max_lines=max_lines)
-    if tail_access.lines:
-        acc_info = parse_access_lines(tail_access.lines)
+    # 1. Multi-vhost + global access log parsing
+    parsed_batches: List[Dict[str, Any]] = []
+    for log_p in active_access_logs:
+        tail_res = ctx.tailer.read_new(log_p, now, max_bytes=max_bytes, max_lines=max_lines)
+        if tail_res.lines:
+            parsed_batches.append(parse_access_lines(tail_res.lines, bad_bot_agents=bad_bots))
+
+    if parsed_batches:
+        acc_info = merge_access_stats(parsed_batches)
         total = acc_info["total"]
         c_5xx = acc_info["5xx"]
         c_4xx = acc_info["4xx"]
@@ -251,8 +429,8 @@ def collect(ctx: Context) -> CollectorOutput:
                 "security",
                 Severity.LOW if auto_ban_success else Severity.CRITICAL,
                 Confidence.CONFIRMED,
-                f"Suspicious exploit request detected in OpenLiteSpeed access log (Auto-Blocked)" if auto_ban_success else
-                f"Suspicious exploit request detected in OpenLiteSpeed access log",
+                "Suspicious exploit request detected in OpenLiteSpeed access log (Auto-Blocked)" if auto_ban_success else
+                "Suspicious exploit request detected in OpenLiteSpeed access log",
                 f"Detected {len(suspicious)} request(s) matching known PHP2Shell/webshell injection paths. Example: IP {sample.get('ip')} requested '{sample.get('path')}' (status: {sample.get('status')}).{action_suffix}",
                 exploit_rec,
                 asset=sample.get("ip", "network"),
@@ -275,42 +453,29 @@ def collect(ctx: Context) -> CollectorOutput:
         thresh_404 = int(ctx.config.get("security.scanner_404_threshold", 30))
         auto_block_404 = bool(ctx.config.get("security.scanner_404_auto_block", True))
         target_jail = str(ctx.config.get("security.fail2ban_block_jail", "auto"))
-        whitelist = set(ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
-
-        # Automatically protect server's own public IP and local hostname IPs
-        cfg_ip = ctx.config.get("security.server_public_ip")
-        if cfg_ip:
-            whitelist.add(str(cfg_ip).strip())
-        try:
-            import socket
-            hostname = socket.gethostname()
-            for host_ip in socket.gethostbyname_ex(hostname)[2]:
-                whitelist.add(host_ip)
-        except Exception:
-            pass
+        whitelist = get_protected_whitelist(ctx)
 
         abusive_404_ips = {
             ip: cnt for ip, cnt in ip_404_counts.items()
-            if cnt >= thresh_404 and ip not in whitelist and not ip.startswith("127.")
+            if cnt >= thresh_404 and not is_protected_ip(ctx, ip, whitelist)[0]
         }
 
         out.metric("openlitespeed.aggressive_404_scanners", len(abusive_404_ips))
         if abusive_404_ips:
-            from shsm.security import blocked
             ban_notes = []
             auto_drop_success = False
             if auto_block_404:
-                # Limit direct kernel drop to top 10 offenders per execution cycle
-                # to prevent spawning excessive subprocesses during massive bot floods
-                sorted_abusive = sorted(abusive_404_ips.items(), key=lambda x: x[1], reverse=True)[:10]
+                sorted_abusive = sorted(abusive_404_ips.items(), key=lambda x: x[1], reverse=True)[:25]
                 dropped_count = 0
                 for a_ip, a_cnt in sorted_abusive:
-                    b_ok, b_msg = blocked.ban_ip_unified(ctx, a_ip, use_iptables=True)
+                    b_ok, b_msg = blocked.ban_ip_unified(
+                        ctx, a_ip, use_iptables=True, reason=f"404 scanner ({a_cnt} hits)"
+                    )
                     if b_ok:
                         dropped_count += 1
-                        ban_notes.append(f"Auto-dropped {a_ip} in iptables ({a_cnt} 404s)")
+                        ban_notes.append(f"Auto-dropped {a_ip} ({a_cnt} 404s)")
                     else:
-                        ban_notes.append(f"Failed iptables drop {a_ip}: {b_msg}")
+                        ban_notes.append(f"Failed drop {a_ip}: {b_msg}")
                 if dropped_count > 0:
                     auto_drop_success = True
 
@@ -318,7 +483,7 @@ def collect(ctx: Context) -> CollectorOutput:
             ban_suffix = f" Actions taken: {'; '.join(ban_notes)}." if ban_notes else ""
             from shsm.core.findings import FindingStatus
             scanner_status = FindingStatus.RESOLVED if auto_drop_success else FindingStatus.OPEN
-            scanner_rec = "The offending scanner IP(s) have been auto-dropped at kernel layer via iptables. No further action needed." if auto_drop_success else \
+            scanner_rec = "The offending scanner IP(s) have been auto-dropped at kernel layer via iptables/CSF/ipset. No further action needed." if auto_drop_success else \
                 "The IP(s) exceeded 404 thresholds. Ensure OpenLiteSpeed client throttling or Fail2Ban jail is active."
 
             out.finding(
@@ -335,7 +500,7 @@ def collect(ctx: Context) -> CollectorOutput:
                 source=SOURCE,
                 key=f"ols:404_flood:{top_offender[0]}",
                 initial_status=scanner_status,
-                status_note="Automatically blocked and resolved via iptables drop rule" if auto_drop_success else "",
+                status_note="Automatically blocked and resolved via iptables/CSF/ipset drop rule" if auto_drop_success else "",
             )
             out.check(
                 "openlitespeed.scanner_404_flood",
@@ -353,6 +518,62 @@ def collect(ctx: Context) -> CollectorOutput:
                 CATEGORY,
                 CheckStatus.PASS,
                 "No aggressive 404 scanner/botnet activity detected in access log",
+                source=SOURCE,
+            )
+
+        # Layer-7 HTTP Burst / High-Cost POST / 401-403-503 / Bad Bot Detection & Auto-Blocking
+        l7_offenders = find_l7_offenders(ctx, acc_info)
+        out.metric("openlitespeed.l7_flood_offenders", len(l7_offenders))
+        if l7_offenders:
+            auto_l7 = bool(ctx.config.get("security.l7_flood_auto_block", True))
+            l7_notes = []
+            l7_mitigated = False
+            if auto_l7:
+                sorted_l7 = sorted(l7_offenders.values(), key=lambda x: x["max_hits"], reverse=True)[:25]
+                dropped_l7 = 0
+                for item in sorted_l7:
+                    reason_str = ", ".join(item["reasons"])
+                    ok_l7, msg_l7 = blocked.ban_ip_unified(ctx, item["ip"], use_iptables=True, reason=reason_str)
+                    if ok_l7:
+                        dropped_l7 += 1
+                        l7_notes.append(f"Blocked {item['ip']} ({reason_str})")
+                    else:
+                        l7_notes.append(f"Failed {item['ip']}: {msg_l7}")
+                l7_mitigated = dropped_l7 > 0
+
+            top_l7 = max(l7_offenders.values(), key=lambda x: x["max_hits"])
+            from shsm.core.findings import FindingStatus
+            out.finding(
+                "openlitespeed.l7_flood",
+                "security",
+                Severity.LOW if l7_mitigated else Severity.CRITICAL,
+                Confidence.CONFIRMED,
+                f"Layer-7 HTTP/Bot flood detected ({len(l7_offenders)} IPs) (Auto-Blocked)" if l7_mitigated
+                else f"Layer-7 HTTP/Bot flood detected ({len(l7_offenders)} IPs)",
+                f"Top offender {top_l7['ip']}: {', '.join(top_l7['reasons'])}. {'; '.join(l7_notes)}",
+                "Offending IPs dropped at firewall layer." if l7_mitigated else "Block offending IPs and enforce OLS rate limits.",
+                asset=top_l7["ip"],
+                source=SOURCE,
+                key=f"ols:l7_flood:{top_l7['ip']}",
+                initial_status=FindingStatus.RESOLVED if l7_mitigated else FindingStatus.OPEN,
+                status_note="Auto-blocked Layer-7 offender via CSF/ipset/iptables" if l7_mitigated else "",
+            )
+            out.check(
+                "openlitespeed.l7_flood",
+                CATEGORY,
+                CheckStatus.PASS if l7_mitigated else CheckStatus.CRITICAL,
+                f"Mitigated {len(l7_offenders)} Layer-7 flood/bot IP(s); top: {top_l7['ip']} ({', '.join(top_l7['reasons'])})"
+                if l7_mitigated else
+                f"Detected {len(l7_offenders)} Layer-7 flood/bot IP(s); top: {top_l7['ip']} ({', '.join(top_l7['reasons'])})",
+                asset=top_l7["ip"],
+                source=SOURCE,
+            )
+        else:
+            out.check(
+                "openlitespeed.l7_flood",
+                CATEGORY,
+                CheckStatus.PASS,
+                "No Layer-7 HTTP burst or bad-bot flood detected across active logs",
                 source=SOURCE,
             )
 

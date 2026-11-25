@@ -7,12 +7,44 @@ from typing import List
 
 from shsm.deploy.schedule import JOBS, JobDef
 
+_DEFENSE_JOBS = {"ddos", "openlitespeed"}
+
+
+def generate_watch_service_unit(bin_path: str = "/opt/shsm/venv/bin/shsm", cfg_path: str = "/etc/shsm/config.yaml") -> str:
+    """Generate real-time adaptive anti-DDoS watcher daemon service unit."""
+    lines = [
+        "[Unit]",
+        "Description=SHSM Real-Time Adaptive Anti-DDoS & L7 Flood Watcher",
+        "Documentation=https://github.com/gmteknologi/shsm",
+        "After=network.target local-fs.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        "User=shsm",
+        "Group=shsm",
+        f"ExecStart={bin_path} --config {cfg_path} watch",
+        "Restart=always",
+        "RestartSec=5",
+        "StandardOutput=journal",
+        "StandardError=journal",
+        "Nice=-5",
+        "CPUQuota=15%",
+        "MemoryHigh=96M",
+        "MemoryMax=128M",
+        "IOWeight=100",
+        "",
+        "[Install]",
+        "WantedBy=multi-user.target",
+    ]
+    return "\n".join(lines) + "\n"
+
 
 def generate_service_unit(job: JobDef, bin_path: str = "/opt/shsm/venv/bin/shsm", cfg_path: str = "/etc/shsm/config.yaml") -> str:
     args_str = " ".join(job.argv)
     user_line = "User=root\nGroup=root" if job.root else "User=shsm\nGroup=shsm"
-    
-    # Resource control & strict throttling to prevent CPU contention
+
+    # Resource control & strict throttling to prevent CPU contention;
+    # active defense collectors (ddos/openlitespeed) must not be starved under 100% CPU floods.
     resource_lines = []
     if job.heavy:
         resource_lines.extend([
@@ -23,6 +55,16 @@ def generate_service_unit(job: JobDef, bin_path: str = "/opt/shsm/venv/bin/shsm"
             "MemoryHigh=256M",
             "MemoryMax=384M",
             "IOWeight=50",
+        ])
+    elif job.name in _DEFENSE_JOBS:
+        resource_lines.extend([
+            "Nice=-2",
+            "IOSchedulingClass=best-effort",
+            "IOSchedulingPriority=4",
+            "CPUQuota=25%",
+            "MemoryHigh=128M",
+            "MemoryMax=192M",
+            "IOWeight=150",
         ])
     else:
         resource_lines.extend([
@@ -98,5 +140,10 @@ def write_all_units(output_dir: str, bin_path: str = "/opt/shsm/venv/bin/shsm", 
         with open(timer_path, "w", encoding="utf-8") as fh:
             fh.write(generate_timer_unit(job))
         generated_files.append(timer_path)
+
+    watch_path = os.path.join(output_dir, "shsm-watch.service")
+    with open(watch_path, "w", encoding="utf-8") as fh:
+        fh.write(generate_watch_service_unit(bin_path, cfg_path))
+    generated_files.append(watch_path)
 
     return generated_files

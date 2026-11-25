@@ -31,7 +31,7 @@ log_info "Upgrading SHSM..."
 
 # 0. Temporarily pause timers and terminate any running background collectors to release DB locks
 log_info "Temporarily pausing SHSM background timers and releasing DB locks..."
-systemctl stop 'shsm-*.timer' 2>/dev/null || true
+systemctl stop 'shsm-*.timer' shsm-watch.service 2>/dev/null || true
 pkill -9 -u "$SHSM_USER" -f "/opt/shsm" 2>/dev/null || true
 rm -f /var/lib/shsm/locks/*.lock /tmp/shsm_locks/*.lock 2>/dev/null || true
 
@@ -108,6 +108,9 @@ if [ -d "$SCRIPT_DIR/systemd" ]; then
         timer_name=$(basename "$timer")
         systemctl start "$timer_name" 2>/dev/null || true
     done
+    if [ -f "/etc/systemd/system/shsm-watch.service" ]; then
+        systemctl enable --now shsm-watch.service 2>/dev/null || true
+    fi
     log_ok "Systemd units updated and timers restarted with non-overlapping schedules."
 fi
 

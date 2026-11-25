@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 import yaml
@@ -77,8 +77,9 @@ def cmd_commands(click_ctx: click.Context) -> None:
             ("shsm ban <IP>", "Block offending IP address (Fail2Ban with automatic iptables fallback)."),
             ("shsm ban <IP> --iptables", "Drop offending IP directly at kernel firewall layer (0% CPU OLS/PHP)."),
             ("shsm unban <IP>", "Unban an IP address centrally from BOTH Fail2Ban and iptables."),
-            ("shsm block-scanners", "Scan access logs, aggregate 404s, and auto-drop scanner bot IPs in iptables."),
-            ("shsm block-scanners --dry-run", "Preview scanner bot IPs exceeding 404 threshold without blocking."),
+            ("shsm block-scanners", "Scan active access logs, aggregate 404/L7 floods, and auto-drop IPs."),
+            ("shsm block-scanners --dry-run", "Preview scanner/flood IPs exceeding threshold without blocking."),
+            ("shsm watch", "Run real-time lightweight adaptive DDoS & L7 flood protection daemon."),
         ]),
         ("3. FINDINGS & ISSUE MANAGEMENT", [
             ("shsm findings list", "List active/open security and health findings."),
@@ -1139,68 +1140,89 @@ def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
 
 @main.command("block-scanners")
 @click.option("--threshold", default=30, type=int, help="Minimum 404 count to trigger ban (default: 30)")
-@click.option("--log-file", default=None, help="Path to access.log (default: from config)")
+@click.option("--log-file", default=None, help="Path to access.log (default: global + active CyberPanel vhost logs)")
+@click.option("--include-l7", is_flag=True, help="Also detect and ban L7 bursts, POST/wp-json floods, and bad bots")
 @click.option("--dry-run", is_flag=True, help="Only show IPs that would be banned without executing ban")
 @click.pass_context
-def cmd_block_scanners(click_ctx: click.Context, threshold: int, log_file: Optional[str], dry_run: bool) -> None:
-    """Scan web server access log, aggregate 404 counts per IP, and ban abusive scanner IPs in iptables."""
+def cmd_block_scanners(
+    click_ctx: click.Context,
+    threshold: int,
+    log_file: Optional[str],
+    include_l7: bool,
+    dry_run: bool,
+) -> None:
+    """Scan web server access log(s), aggregate 404/L7 flood counts per IP, and ban abusive IPs."""
     app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
+    from shsm.collectors.openlitespeed import (
+        _DEFAULT_BAD_BOTS,
+        discover_active_access_logs,
+        find_l7_offenders,
+        merge_access_stats,
+        parse_access_lines,
+    )
     from shsm.security import blocked
-    from shsm.collectors.openlitespeed import _ACCESS_LOG_LINE
 
-    log_path = log_file or str(app_ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
-    if not os.path.isfile(log_path):
-        click.secho(f"[ERROR] Access log file not found at {log_path}", fg="red")
-        sys.exit(1)
+    if log_file:
+        if not os.path.isfile(log_file):
+            click.secho(f"[ERROR] Access log file not found at {log_file}", fg="red")
+            sys.exit(1)
+        log_paths = [log_file]
+    else:
+        log_paths = discover_active_access_logs(app_ctx, active_window_seconds=3600)
+        if not log_paths:
+            default_log = str(app_ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
+            click.secho(f"[ERROR] No active access logs found (checked {default_log} and vhost globs)", fg="red")
+            sys.exit(1)
 
-    click.echo(f"Scanning {log_path} for IPs with >= {threshold} 404 errors...")
+    click.echo(f"Scanning {len(log_paths)} access log(s) for IPs with >= {threshold} 404 errors...")
 
-    # Whitelist and local system IPs protection
-    whitelist = set(app_ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
-    cfg_ip = app_ctx.config.get("security.server_public_ip")
-    if cfg_ip:
-        whitelist.add(str(cfg_ip).strip())
-    try:
-        import socket
-        hostname = socket.gethostname()
-        for host_ip in socket.gethostbyname_ex(hostname)[2]:
-            whitelist.add(host_ip)
-    except Exception:
-        pass
+    whitelist = blocked.get_protected_whitelist(app_ctx)
+    bad_bots = app_ctx.config.get("security.bad_bot_user_agents", list(_DEFAULT_BAD_BOTS))
+    batches: List[Dict[str, Any]] = []
 
-    ip_counts: Dict[str, int] = {}
-    total_404s = 0
-    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            m = _ACCESS_LOG_LINE.search(line)
-            if m and m.group("status") == "404":
-                if "SHSM-Monitor" in line:
-                    continue
-                ip = m.group("ip")
-                if ip:
-                    total_404s += 1
-                    ip_counts[ip] = ip_counts.get(ip, 0) + 1
+    for lp in log_paths:
+        try:
+            with open(lp, encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+            if lines:
+                batches.append(parse_access_lines(lines, bad_bot_agents=bad_bots))
+        except OSError:
+            continue
 
-    targets = [
-        (ip, cnt) for ip, cnt in ip_counts.items()
-        if cnt >= threshold and ip not in whitelist and not ip.startswith("127.")
-    ]
-    targets.sort(key=lambda x: x[1], reverse=True)
+    merged = merge_access_stats(batches)
+    ip_counts = merged.get("ip_404_counts", {})
+    total_404s = sum(ip_counts.values())
 
-    click.echo(f"Total 404 requests in log: {total_404s}. Found {len(targets)} external IP(s) exceeding threshold ({threshold}).")
-    if not targets:
+    targets: Dict[str, Tuple[int, str]] = {}
+    for ip, cnt in ip_counts.items():
+        if cnt >= threshold and not blocked.is_protected_ip(app_ctx, ip, whitelist)[0]:
+            targets[ip] = (cnt, f"{cnt} 404 hits")
+
+    if include_l7:
+        for ip, info in find_l7_offenders(app_ctx, merged).items():
+            reason_str = ", ".join(info["reasons"])
+            if ip in targets:
+                prev_cnt, prev_reason = targets[ip]
+                targets[ip] = (max(prev_cnt, info["max_hits"]), f"{prev_reason}; {reason_str}")
+            else:
+                targets[ip] = (info["max_hits"], reason_str)
+
+    sorted_targets = sorted(targets.items(), key=lambda x: x[1][0], reverse=True)
+
+    click.echo(f"Total 404 requests in log: {total_404s}. Found {len(sorted_targets)} external IP(s) exceeding threshold ({threshold}).")
+    if not sorted_targets:
         click.secho("No external scanner IPs exceeded the threshold.", fg="green")
         return
 
-    click.echo(f"\n{'IP Address':<20} {'404 Hits':<10} {'Action / Status'}")
-    click.echo("-" * 65)
+    click.echo(f"\n{'IP Address':<20} {'Hits':<10} {'Action / Status'}")
+    click.echo("-" * 70)
 
     banned_count = 0
-    for ip, cnt in targets:
+    for ip, (cnt, reason) in sorted_targets:
         if dry_run:
-            click.echo(f"{ip:<20} {cnt:<10} [DRY-RUN] Would be blocked via iptables DROP")
+            click.echo(f"{ip:<20} {cnt:<10} [DRY-RUN] Would be blocked ({reason})")
         else:
-            ok, msg = blocked.ban_ip_unified(app_ctx, ip, use_iptables=True)
+            ok, msg = blocked.ban_ip_unified(app_ctx, ip, use_iptables=True, reason=reason)
             if ok:
                 banned_count += 1
                 click.secho(f"{ip:<20} {cnt:<10} [BANNED] {msg}", fg="green")
@@ -1208,9 +1230,31 @@ def cmd_block_scanners(click_ctx: click.Context, threshold: int, log_file: Optio
                 click.secho(f"{ip:<20} {cnt:<10} [FAILED] {msg}", fg="yellow")
 
     if dry_run:
-        click.secho(f"\nDry-run completed. {len(targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
+        click.secho(f"\nDry-run completed. {len(sorted_targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
     else:
-        click.secho(f"\nSuccessfully processed {len(targets)} IP(s) ({banned_count} newly blocked in iptables).", fg="green", bold=True)
+        click.secho(f"\nSuccessfully processed {len(sorted_targets)} IP(s) ({banned_count} newly blocked).", fg="green", bold=True)
+
+
+@main.command("watch")
+@click.option("--interval", default=None, type=int, help="Override polling interval in seconds (default: adaptive 5-10s)")
+@click.option("--once", is_flag=True, help="Run a single inspection tick and exit")
+@click.option("--dry-run", is_flag=True, help="Detect threats without executing firewall bans")
+@click.pass_context
+def cmd_watch(click_ctx: click.Context, interval: Optional[int], once: bool, dry_run: bool) -> None:
+    """Run real-time lightweight adaptive DDoS & Layer-7 flood protection daemon."""
+    app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
+    from shsm.security.watch import run_watch_loop
+
+    def _emit(summary: Dict[str, Any]) -> None:
+        for act in summary.get("actions", []):
+            click.echo(act)
+        if once:
+            click.secho(
+                f"Watch tick done (load/cpu={summary['load_per_cpu']:.2f}, logs={summary['logs_watched']}, banned={len(summary['banned_ips'])}).",
+                fg="green" if not summary["banned_ips"] else "yellow",
+            )
+
+    run_watch_loop(app_ctx, interval_override=interval, once=once, dry_run=dry_run, on_tick=_emit)
 
 
 # ---------------------------------------------------------------- systemd unit generator
@@ -1226,6 +1270,7 @@ def grp_systemd() -> None:
 def cmd_systemd_install(click_ctx: click.Context, output_dir: str, do_reload: bool) -> None:
     """Generate and install all systemd service and timer unit files."""
     import subprocess
+
     from shsm.deploy.systemd import write_all_units
 
     app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
@@ -1244,14 +1289,15 @@ def cmd_systemd_install(click_ctx: click.Context, output_dir: str, do_reload: bo
         try:
             subprocess.run(["systemctl", "daemon-reload"], check=True)
             click.echo("Systemd daemon reloaded.")
-            # Enable and start timers
+            # Enable and start timers and real-time watch daemon
             timer_count = 0
             for f in files:
-                if f.endswith(".timer"):
-                    t_name = os.path.basename(f)
-                    subprocess.run(["systemctl", "enable", "--now", t_name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    timer_count += 1
-            click.secho(f"Enabled and started {timer_count} systemd timer(s).", fg="green", bold=True)
+                base_n = os.path.basename(f)
+                if base_n.endswith(".timer") or base_n == "shsm-watch.service":
+                    subprocess.run(["systemctl", "enable", "--now", base_n], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if base_n.endswith(".timer"):
+                        timer_count += 1
+            click.secho(f"Enabled and started {timer_count} systemd timer(s) and shsm-watch.service.", fg="green", bold=True)
         except Exception as exc:
             click.secho(f"[WARNING] Could not reload systemd or enable timers: {exc}", fg="yellow")
 

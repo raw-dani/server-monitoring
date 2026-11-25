@@ -24,6 +24,7 @@ SECRETS = {
     "redis_password": ("redis.password_file", "SHSM_REDIS_PASSWORD"),
     "mariadb_defaults": ("mariadb.defaults_file", "SHSM_MARIADB_DEFAULTS_FILE"),
     "vulnerability_api_key": ("vulnerability.api_key_file", "SHSM_VULN_API_KEY"),
+    "cloudflare_token": ("security.cloudflare_token_file", "SHSM_CLOUDFLARE_TOKEN"),
 }
 
 DEFAULTS: Dict[str, Any] = {
@@ -167,6 +168,8 @@ DEFAULTS: Dict[str, Any] = {
         "error_log": "/usr/local/lsws/logs/error.log",
         "access_log": "/usr/local/lsws/logs/access.log",
         "vhost_log_globs": ["/home/*/logs/*.access_log", "/home/*/logs/*.error_log"],
+        "scan_vhost_logs": True,
+        "vhost_active_window_seconds": 300,
         "max_vhost_logs": 200,
         "max_bytes_per_run": 8 * 1024 * 1024,
         "max_lines_per_run": 100000,
@@ -287,6 +290,23 @@ DEFAULTS: Dict[str, Any] = {
         "fail2ban_block_jail": "auto",  # 'auto' or specific jail name like 'ols-scanner'
         "scanner_404_auto_block": True,
         "scanner_404_threshold": 30,    # Max 404 errors per run from single IP before auto-ban
+        "ddos_auto_block": True,        # Auto-ban Layer-4 connection flood violators
+        "ddos_ban_ttl_seconds": 3600,   # Temporary ban duration for CSF/ipset (1 hour)
+        "ipset_enabled": True,          # Prefer O(1) ipset hash:ip when available
+        "l7_flood_auto_block": True,    # Auto-ban HTTP burst / high-cost / bad-bot offenders
+        "l7_burst_threshold": 150,      # Max total requests per IP per log check window
+        "l7_watch_burst_threshold": 50, # Max requests per IP within real-time watch tick (10-15s)
+        "l7_high_cost_threshold": 20,   # Max wp-login/xmlrpc/wp-json/admin-ajax hits per IP per window
+        "l7_auth_error_threshold": 30,  # Max 401/403/503 hits per IP per window
+        "bad_bot_auto_block": True,
+        "bad_bot_user_agents": ["RiverBot", "KeenableBot", "Bytespider", "PetalBot"],
+        "protect_cloudflare_ips": True, # Never block Cloudflare edge CIDRs in local firewall
+        "cloudflare_enabled": False,
+        "cloudflare_zone_id": "",
+        "cloudflare_token_file": "/etc/shsm/secrets/cloudflare_token",
+        "watch_interval_seconds": 10,
+        "emergency_circuit_breaker": True,
+        "emergency_load_per_cpu": 5.0,
         "ip_whitelist": ["127.0.0.1", "::1"],
         "server_public_ip": "",
         "rbl_providers": [
