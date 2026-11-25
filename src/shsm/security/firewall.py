@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
@@ -13,6 +14,9 @@ from shsm.core.subprocesses import Runner
 
 SOURCE = "firewall_audit"
 CATEGORY = "security"
+
+_FW_DETECT_CACHE: Dict[str, Tuple[float, Tuple[str, bool, str]]] = {}
+_FW_CACHE_TTL_SECONDS = 30.0
 
 
 def find_firewall_binary(ctx: Context, name: str, extra_paths: Tuple[str, ...] = ()) -> Optional[str]:
@@ -55,6 +59,16 @@ def _exec_firewall_cmd(ctx: Context, cmd: List[str], timeout: float = 10) -> Any
 def detect_active_firewall(ctx: Context) -> Tuple[str, bool, str]:
     """Check configured or auto-detected firewall: CSF, Firewalld, UFW, iptables, nftables, or custom."""
     backend = str(ctx.config.get("security.firewall_backend", "auto")).lower()
+    use_cache = type(ctx.runner) is Runner and backend != "custom"
+    if use_cache:
+        cached = _FW_DETECT_CACHE.get(backend)
+        if cached and (time.monotonic() - cached[0]) < _FW_CACHE_TTL_SECONDS:
+            return cached[1]
+
+    def _ret(res: Tuple[str, bool, str]) -> Tuple[str, bool, str]:
+        if use_cache:
+            _FW_DETECT_CACHE[backend] = (time.monotonic(), res)
+        return res
 
     # 1. Custom command check if explicitly configured
     if backend == "custom":
@@ -71,14 +85,14 @@ def detect_active_firewall(ctx: Context) -> Tuple[str, bool, str]:
     if backend in ("auto", "csf") and csf_bin:
         res = _exec_firewall_cmd(ctx, [csf_bin, "-l"], timeout=10)
         if res.ok and ("Chain" in res.stdout or "csf" in res.stdout.lower()):
-            return "csf", True, "CSF (ConfigServer Security & Firewall) is active"
+            return _ret(("csf", True, "CSF (ConfigServer Security & Firewall) is active"))
 
     # 3. Firewalld (firewall-cmd)
     fwd_bin = find_firewall_binary(ctx, "firewall-cmd", ("/usr/bin/firewall-cmd", "/usr/sbin/firewall-cmd"))
     if backend in ("auto", "firewalld") and fwd_bin:
         res = _exec_firewall_cmd(ctx, [fwd_bin, "--state"], timeout=10)
         if res.ok and "running" in res.stdout.lower():
-            return "firewalld", True, "Firewalld is running and active"
+            return _ret(("firewalld", True, "Firewalld is running and active"))
 
     # 4. UFW (Uncomplicated Firewall)
     ufw_bin = find_firewall_binary(ctx, "ufw", ("/usr/sbin/ufw", "/usr/bin/ufw"))
@@ -86,16 +100,16 @@ def detect_active_firewall(ctx: Context) -> Tuple[str, bool, str]:
         res = _exec_firewall_cmd(ctx, [ufw_bin, "status"], timeout=10)
         if res.ok:
             if "status: active" in res.stdout.lower():
-                return "ufw", True, "UFW firewall is active"
+                return _ret(("ufw", True, "UFW firewall is active"))
             elif "status: inactive" in res.stdout.lower() and backend == "ufw":
-                return "ufw", False, "UFW is installed but inactive"
+                return _ret(("ufw", False, "UFW is installed but inactive"))
 
     # 5. nftables
     nft_bin = find_firewall_binary(ctx, "nft", ("/usr/sbin/nft", "/sbin/nft", "/usr/bin/nft"))
     if backend in ("auto", "nftables") and nft_bin:
         res = _exec_firewall_cmd(ctx, [nft_bin, "list", "ruleset"], timeout=10)
         if res.ok and len(res.stdout.strip()) > 20:
-            return "nftables", True, "nftables ruleset is active"
+            return _ret(("nftables", True, "nftables ruleset is active"))
 
     # 6. iptables / iptables-legacy
     ipt = find_firewall_binary(ctx, "iptables", ("/sbin/iptables", "/usr/sbin/iptables", "/usr/bin/iptables"))
@@ -103,7 +117,7 @@ def detect_active_firewall(ctx: Context) -> Tuple[str, bool, str]:
         res = _exec_firewall_cmd(ctx, [ipt, "-L", "-n"], timeout=10)
         if res.ok and "Chain" in res.stdout:
             lines = [ln.strip() for ln in res.stdout.splitlines() if ln.strip() and not ln.startswith("Chain") and not ln.startswith("target")]
-            return "iptables", True, f"iptables is active ({len(lines)} rules configured)"
+            return _ret(("iptables", True, f"iptables is active ({len(lines)} rules configured)"))
 
     # 7. Fallback to active systemd units
     for unit_name, fw_label in [
@@ -118,12 +132,12 @@ def detect_active_firewall(ctx: Context) -> Tuple[str, bool, str]:
         if backend in ("auto", fw_label):
             res = ctx.runner.run(["systemctl", "is-active", unit_name], timeout=5)
             if res.ok and res.stdout.strip() == "active":
-                return fw_label, True, f"{unit_name} is active in systemd"
+                return _ret((fw_label, True, f"{unit_name} is active in systemd"))
 
     if backend != "auto" and backend != "none":
-        return backend, False, f"Configured firewall backend '{backend}' is not active or not installed"
+        return _ret((backend, False, f"Configured firewall backend '{backend}' is not active or not installed"))
 
-    return "none", False, "No active firewall service detected (checked CSF, Firewalld, UFW, iptables, nftables)"
+    return _ret(("none", False, "No active firewall service detected (checked CSF, Firewalld, UFW, iptables, nftables)"))
 
 
 def _is_public_ip(ip: str) -> bool:

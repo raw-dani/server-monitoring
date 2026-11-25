@@ -1156,6 +1156,7 @@ def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
 @click.option("--threshold", default=30, type=int, help="Minimum 404 count to trigger ban (default: 30)")
 @click.option("--log-file", default=None, help="Path to access.log (default: global + active CyberPanel vhost logs)")
 @click.option("--include-l7", is_flag=True, help="Also detect and ban L7 bursts, POST/wp-json floods, and bad bots")
+@click.option("--limit", default=50, type=int, help="Max new IPs to ban per run to prevent CPU saturation (default: 50)")
 @click.option("--dry-run", is_flag=True, help="Only show IPs that would be banned without executing ban")
 @click.pass_context
 def cmd_block_scanners(
@@ -1163,6 +1164,7 @@ def cmd_block_scanners(
     threshold: int,
     log_file: Optional[str],
     include_l7: bool,
+    limit: int,
     dry_run: bool,
 ) -> None:
     """Scan web server access log(s), aggregate 404/L7 flood counts per IP, and ban abusive IPs."""
@@ -1174,68 +1176,95 @@ def cmd_block_scanners(
         merge_access_stats,
         parse_access_lines,
     )
+    from shsm.core.locks import FileLock, LockBusy
     from shsm.security import blocked
 
-    if log_file:
-        if not os.path.isfile(log_file):
-            click.secho(f"[ERROR] Access log file not found at {log_file}", fg="red")
-            sys.exit(1)
-        log_paths = [log_file]
-    else:
-        log_paths = discover_active_access_logs(app_ctx, active_window_seconds=3600)
-        if not log_paths:
-            default_log = str(app_ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
-            click.secho(f"[ERROR] No active access logs found (checked {default_log} and vhost globs)", fg="red")
-            sys.exit(1)
-
-    click.echo(f"Scanning {len(log_paths)} access log(s) for IPs with >= {threshold} 404 errors...")
-
-    whitelist = blocked.get_protected_whitelist(app_ctx)
-    bad_bots = app_ctx.config.get("security.bad_bot_user_agents", list(_DEFAULT_BAD_BOTS))
-    batches: List[Dict[str, Any]] = []
-
-    for lp in log_paths:
+    lock = None
+    if not dry_run:
+        lock_path = os.path.join(str(app_ctx.config.get("paths.lock_dir", "/var/lib/shsm/locks")), "block-scanners.lock")
+        lock = FileLock(lock_path)
         try:
-            with open(lp, encoding="utf-8", errors="replace") as fh:
-                lines = fh.read().splitlines()
-            if lines:
-                batches.append(parse_access_lines(lines, bad_bot_agents=bad_bots))
-        except OSError:
-            continue
+            lock.acquire()
+        except LockBusy:
+            click.secho("[INFO] Another block-scanners process is already running; skipping overlapping run.", fg="yellow")
+            return
 
-    merged = merge_access_stats(batches)
-    ip_counts = merged.get("ip_404_counts", {})
-    total_404s = sum(ip_counts.values())
-
-    targets: Dict[str, Tuple[int, str]] = {}
-    for ip, cnt in ip_counts.items():
-        if cnt >= threshold and not blocked.is_protected_ip(app_ctx, ip, whitelist)[0]:
-            targets[ip] = (cnt, f"{cnt} 404 hits")
-
-    if include_l7:
-        for ip, info in find_l7_offenders(app_ctx, merged).items():
-            reason_str = ", ".join(info["reasons"])
-            if ip in targets:
-                prev_cnt, prev_reason = targets[ip]
-                targets[ip] = (max(prev_cnt, info["max_hits"]), f"{prev_reason}; {reason_str}")
-            else:
-                targets[ip] = (info["max_hits"], reason_str)
-
-    sorted_targets = sorted(targets.items(), key=lambda x: x[1][0], reverse=True)
-
-    click.echo(f"Total 404 requests in log: {total_404s}. Found {len(sorted_targets)} external IP(s) exceeding threshold ({threshold}).")
-    if not sorted_targets:
-        click.secho("No external scanner IPs exceeded the threshold.", fg="green")
-        return
-
-    click.echo(f"\n{'IP Address':<20} {'Hits':<10} {'Action / Status'}")
-    click.echo("-" * 70)
-
-    banned_count = 0
-    for ip, (cnt, reason) in sorted_targets:
-        if dry_run:
-            click.echo(f"{ip:<20} {cnt:<10} [DRY-RUN] Would be blocked ({reason})")
+    try:
+        if log_file:
+            if not os.path.isfile(log_file):
+                click.secho(f"[ERROR] Access log file not found at {log_file}", fg="red")
+                sys.exit(1)
+            log_paths = [log_file]
         else:
+            log_paths = discover_active_access_logs(app_ctx, active_window_seconds=3600)
+            if not log_paths:
+                default_log = str(app_ctx.config.get("openlitespeed.access_log", "/usr/local/lsws/logs/access.log"))
+                click.secho(f"[ERROR] No active access logs found (checked {default_log} and vhost globs)", fg="red")
+                sys.exit(1)
+
+        click.echo(f"Scanning {len(log_paths)} access log(s) for IPs with >= {threshold} 404 errors...")
+
+        whitelist = blocked.get_protected_whitelist(app_ctx)
+        bad_bots = app_ctx.config.get("security.bad_bot_user_agents", list(_DEFAULT_BAD_BOTS))
+        max_tail_bytes = int(app_ctx.config.get("openlitespeed.max_bytes_per_run", 8 * 1024 * 1024))
+        batches: List[Dict[str, Any]] = []
+
+        for lp in log_paths:
+            try:
+                with open(lp, "rb") as fh:
+                    if not log_file:
+                        sz = os.fstat(fh.fileno()).st_size
+                        if sz > max_tail_bytes:
+                            fh.seek(sz - max_tail_bytes)
+                            fh.readline()  # align to next full line
+                    lines = fh.read().decode("utf-8", errors="replace").splitlines()
+                if lines:
+                    batches.append(parse_access_lines(lines, bad_bot_agents=bad_bots))
+            except OSError:
+                continue
+
+        merged = merge_access_stats(batches)
+        ip_counts = merged.get("ip_404_counts", {})
+        total_404s = sum(ip_counts.values())
+
+        targets: Dict[str, Tuple[int, str]] = {}
+        for ip, cnt in ip_counts.items():
+            if cnt >= threshold and not blocked.is_protected_ip(app_ctx, ip, whitelist)[0]:
+                targets[ip] = (cnt, f"{cnt} 404 hits")
+
+        if include_l7:
+            for ip, info in find_l7_offenders(app_ctx, merged).items():
+                reason_str = ", ".join(info["reasons"])
+                if ip in targets:
+                    prev_cnt, prev_reason = targets[ip]
+                    targets[ip] = (max(prev_cnt, info["max_hits"]), f"{prev_reason}; {reason_str}")
+                else:
+                    targets[ip] = (info["max_hits"], reason_str)
+
+        sorted_targets = sorted(targets.items(), key=lambda x: x[1][0], reverse=True)
+
+        click.echo(f"Total 404 requests in log: {total_404s}. Found {len(sorted_targets)} external IP(s) exceeding threshold ({threshold}).")
+        if not sorted_targets:
+            click.secho("No external scanner IPs exceeded the threshold.", fg="green")
+            return
+
+        already_blocked = set() if dry_run else {x["target"] for x in blocked.list_all_blocked(app_ctx)}
+
+        click.echo(f"\n{'IP Address':<20} {'Hits':<10} {'Action / Status'}")
+        click.echo("-" * 70)
+
+        banned_count = 0
+        processed_count = 0
+        for ip, (cnt, reason) in sorted_targets:
+            if dry_run:
+                click.echo(f"{ip:<20} {cnt:<10} [DRY-RUN] Would be blocked ({reason})")
+                continue
+            if ip in already_blocked:
+                click.echo(f"{ip:<20} {cnt:<10} [SKIPPED] Already blocked")
+                continue
+            if processed_count >= max(1, limit):
+                break
+            processed_count += 1
             ok, msg = blocked.ban_ip_unified(app_ctx, ip, use_iptables=True, reason=reason)
             if ok:
                 banned_count += 1
@@ -1243,10 +1272,13 @@ def cmd_block_scanners(
             else:
                 click.secho(f"{ip:<20} {cnt:<10} [FAILED] {msg}", fg="yellow")
 
-    if dry_run:
-        click.secho(f"\nDry-run completed. {len(sorted_targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
-    else:
-        click.secho(f"\nSuccessfully processed {len(sorted_targets)} IP(s) ({banned_count} newly blocked).", fg="green", bold=True)
+        if dry_run:
+            click.secho(f"\nDry-run completed. {len(sorted_targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
+        else:
+            click.secho(f"\nSuccessfully processed {processed_count} IP(s) ({banned_count} newly blocked).", fg="green", bold=True)
+    finally:
+        if lock is not None:
+            lock.release()
 
 
 @main.command("watch")

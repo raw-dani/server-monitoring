@@ -6,14 +6,17 @@ import ipaddress
 import logging
 import re
 import socket
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from shsm.core.context import Context
+from shsm.core.subprocesses import Runner
 from shsm.security import fail2ban
 from shsm.security.fail2ban import _run_with_sudo_fallback, is_valid_ip
 from shsm.security.firewall import detect_active_firewall, find_firewall_binary
 
 log = logging.getLogger(__name__)
+_IPSET_INIT_CACHE: Dict[str, float] = {}
 
 # Official Cloudflare IPv4/IPv6 edge ranges so local firewall never blocks proxy traffic.
 _CLOUDFLARE_CIDRS = (
@@ -426,18 +429,24 @@ def _ban_via_ipset(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[bool,
     if not ipt_bin:
         return False, f"{tool_name} binary not found"
 
-    create_cmd = [ipset_bin, "create", set_name, "hash:ip", "family", family, "timeout", str(max(60, ttl_seconds)), "-exist"]
-    res_create = _run_with_sudo_fallback(ctx, create_cmd, timeout=6)
-    if not res_create.ok:
-        return False, f"ipset create failed: {res_create.stderr or res_create.stdout}"
+    # Cache ipset table creation & iptables hook verification for 60s on real hosts
+    # so burst bans execute only a single O(1) 'ipset add' (~2ms).
+    now_mono = time.monotonic()
+    need_init = type(ctx.runner) is not Runner or (now_mono - _IPSET_INIT_CACHE.get(set_name, 0.0)) >= 60.0
+    if need_init:
+        create_cmd = [ipset_bin, "create", set_name, "hash:ip", "family", family, "timeout", str(max(60, ttl_seconds)), "-exist"]
+        res_create = _run_with_sudo_fallback(ctx, create_cmd, timeout=6)
+        if not res_create.ok:
+            return False, f"ipset create failed: {res_create.stderr or res_create.stdout}"
 
-    # Ensure kernel INPUT hook exists once
-    chk_cmd = [ipt_bin, "-C", "INPUT", "-m", "set", "--match-set", set_name, "src", "-j", "DROP"]
-    if not _run_with_sudo_fallback(ctx, chk_cmd, timeout=6).ok:
-        ins_cmd = [ipt_bin, "-I", "INPUT", "-m", "set", "--match-set", set_name, "src", "-j", "DROP"]
-        res_ins = _run_with_sudo_fallback(ctx, ins_cmd, timeout=6)
-        if not res_ins.ok:
-            return False, f"iptables ipset hook failed: {res_ins.stderr or res_ins.stdout}"
+        chk_cmd = [ipt_bin, "-C", "INPUT", "-m", "set", "--match-set", set_name, "src", "-j", "DROP"]
+        if not _run_with_sudo_fallback(ctx, chk_cmd, timeout=6).ok:
+            ins_cmd = [ipt_bin, "-I", "INPUT", "1", "-m", "set", "--match-set", set_name, "src", "-j", "DROP"]
+            res_ins = _run_with_sudo_fallback(ctx, ins_cmd, timeout=6)
+            if not res_ins.ok:
+                return False, f"iptables ipset hook failed: {res_ins.stderr or res_ins.stdout}"
+        if type(ctx.runner) is Runner:
+            _IPSET_INIT_CACHE[set_name] = now_mono
 
     add_cmd = [ipset_bin, "add", set_name, clean_ip, "timeout", str(max(60, ttl_seconds)), "-exist"]
     res_add = _run_with_sudo_fallback(ctx, add_cmd, timeout=6)
@@ -534,21 +543,18 @@ def ban_ip_unified(
     tool_name = "ip6tables" if is_v6 else "iptables"
 
     def _apply_kernel_ban(prefix: str = "") -> Tuple[bool, str]:
+        # Prefer O(1) C-speed ipset (~2ms) before Perl/Python firewall CLIs (~1000ms CSF Perl CPU burn)
+        attempts: List[Any] = [lambda: _ban_via_ipset(ctx, clean_ip, ttl)]
         fw_name, fw_active, _ = detect_active_firewall(ctx)
-        # Try matching active firewall backend first, then ipset/fallbacks
-        attempts: List[Any] = []
         if fw_name == "csf" and fw_active:
             attempts.append(lambda: _ban_via_csf(ctx, clean_ip, ttl, ban_reason))
         elif fw_name == "ufw" and fw_active:
-            attempts.append(lambda: _ban_via_ipset(ctx, clean_ip, ttl))
             attempts.append(lambda: _ban_via_ufw(ctx, clean_ip, ban_reason))
         elif fw_name == "firewalld" and fw_active:
             attempts.append(lambda: _ban_via_firewalld(ctx, clean_ip, ttl))
-            attempts.append(lambda: _ban_via_ipset(ctx, clean_ip, ttl))
         else:
             attempts.extend([
                 lambda: _ban_via_csf(ctx, clean_ip, ttl, ban_reason),
-                lambda: _ban_via_ipset(ctx, clean_ip, ttl),
                 lambda: _ban_via_ufw(ctx, clean_ip, ban_reason),
                 lambda: _ban_via_firewalld(ctx, clean_ip, ttl),
             ])
