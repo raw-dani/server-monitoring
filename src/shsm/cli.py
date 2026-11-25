@@ -617,10 +617,26 @@ def grp_wordpress() -> None:
 def cmd_wordpress_discover(click_ctx: click.Context) -> None:
     """Discover WordPress sites in document roots."""
     app_ctx = get_context(click_ctx.obj.get("config_path"))
+    from shsm.core.findings import CheckStatus
     from shsm.discovery.wordpress import discover_wordpress_sites
 
     sites = discover_wordpress_sites(app_ctx)
     res = app_ctx.inventory.sync_wordpress_sites(sites, app_ctx.now())
+    engine = RunnerEngine(app_ctx)
+
+    def _rec():
+        out = CollectorOutput()
+        out.scope("wordpress.discovery")
+        out.check(
+            "wordpress.discovery",
+            "wordpress",
+            CheckStatus.PASS if sites else CheckStatus.NOT_APPLICABLE,
+            f"Discovered {res['active']} active WordPress site(s)",
+            source="wp-discovery",
+        )
+        return out
+
+    engine.run_job("wordpress-discover", _rec)
     click.secho(f"Discovered {res['active']} WordPress site(s).", fg="green")
     for s in sites:
         owner_info = f"owner: {s['owner']}" if s['is_safe_owner'] else "UNSAFE OWNER"
