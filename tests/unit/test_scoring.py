@@ -46,3 +46,18 @@ def test_compute_scores_context(test_db, sample_config):
     assert "security_score" in snapshot
     assert snapshot["health_score"] >= 0.0
     assert snapshot["security_score"] >= 0.0
+
+
+def test_no_double_deduction_for_same_check_and_finding():
+    now_dt = datetime.now(timezone.utc)
+    iso_now = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    checks = [
+        {"check_id": "cpu.usage", "status": "CRITICAL", "checked_at": iso_now},
+    ]
+    findings = [
+        {"check_id": "cpu.usage", "component": "cpu_load", "severity": Severity.CRITICAL.value},
+    ]
+    score, _cov, details = calculate_component_score("cpu_load", checks, findings, now_dt)
+    # 40 deducted from CRITICAL finding; check_id already covered so no extra 30 deduction
+    assert score == 60.0
+    assert details["active_issues"] == 1

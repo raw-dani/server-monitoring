@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 from typing import Any, Dict
 
@@ -30,6 +31,11 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+
+def _esc(val: Any) -> str:
+    """Escape text for ReportLab Paragraph XML markup so &, <, > never trigger parse errors."""
+    return html.escape(str(val if val is not None else ""))
 
 
 def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
@@ -98,10 +104,10 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
     story = []
 
     # Title & Metadata
-    title = str(data.get("title", "Server Health & Security Report"))
-    hostname = str(data.get("hostname", "Server"))
-    period_str = str(data.get("period", ""))
-    gen_time = str(data.get("generated_at", ""))
+    title = _esc(data.get("title", "Server Health & Security Report"))
+    hostname = _esc(data.get("hostname", "Server"))
+    period_str = _esc(data.get("period", ""))
+    gen_time = _esc(data.get("generated_at", ""))
 
     story.append(Paragraph(title, title_style))
     story.append(Paragraph(f"Server: <b>{hostname}</b> | Periode: {period_str} | Dibuat: {gen_time}", meta_style))
@@ -206,6 +212,71 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
     story.append(summary_table)
     story.append(Spacer(1, 10))
 
+    # Resource Performance Summary (CPU, Load, RAM, Disk)
+    metrics = data.get("metrics_summary", {}) or {}
+    if any(metrics.get(k) is not None for k in ("cpu_avg", "load_avg", "mem_avg_avail", "disk_avg")):
+        def _fmt_p(v1: Any, v2: Any, unit: str = "%") -> str:
+            s1 = f"{float(v1):.1f}{unit}" if v1 is not None else "-"
+            s2 = f"{float(v2):.1f}{unit}" if v2 is not None else "-"
+            return f"{s1} / {s2}"
+
+        l1 = f"{float(metrics['load_avg']):.2f}" if metrics.get("load_avg") is not None else "-"
+        l2 = f"{float(metrics['load_peak']):.2f}" if metrics.get("load_peak") is not None else "-"
+        story.append(Paragraph("Ringkasan Performa Resource Server", h2_style))
+        m_rows = [
+            [
+                Paragraph("<b>CPU (Rata / Puncak)</b>", cell_bold),
+                Paragraph("<b>Load Avg (Rata / Puncak)</b>", cell_bold),
+                Paragraph("<b>RAM Tersedia (Rata / Min)</b>", cell_bold),
+                Paragraph("<b>Disk Root (Rata / Puncak)</b>", cell_bold),
+            ],
+            [
+                Paragraph(_fmt_p(metrics.get("cpu_avg"), metrics.get("cpu_peak")), cell_style),
+                Paragraph(f"{l1} / {l2}", cell_style),
+                Paragraph(_fmt_p(metrics.get("mem_avg_avail"), metrics.get("mem_min_avail")), cell_style),
+                Paragraph(_fmt_p(metrics.get("disk_avg"), metrics.get("disk_peak")), cell_style),
+            ],
+        ]
+        m_table = Table(m_rows, colWidths=[135, 135, 135, 135])
+        m_table.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ])
+        )
+        story.append(m_table)
+        story.append(Spacer(1, 10))
+
+    # Prioritized Action Items
+    action_items = data.get("action_items", [])
+    if action_items:
+        story.append(Paragraph("Prioritas Tindakan yang Perlu Dilakukan", h2_style))
+        a_rows = [[
+            Paragraph("<b>Prioritas</b>", cell_bold),
+            Paragraph("<b>Masalah &amp; Langkah Tindakan</b>", cell_bold),
+        ]]
+        for act in action_items:
+            p = _esc(str(act.get("priority", "INFO")).upper())
+            p_col = "#991b1b" if p == "CRITICAL" else ("#9a3412" if p == "HIGH" else "#854d0e")
+            a_rows.append([
+                Paragraph(f"<font color='{p_col}'><b>{p}</b></font>", cell_bold),
+                Paragraph(f"<b>{_esc(act.get('title', ''))}</b><br/>{_esc(act.get('action', ''))}", cell_style),
+            ])
+        a_table = Table(a_rows, colWidths=[75, 465])
+        a_table.setStyle(
+            TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ])
+        )
+        story.append(a_table)
+        story.append(Spacer(1, 10))
+
     # Subsystems Breakdown Table
     components = data.get("components", {})
     if components:
@@ -220,10 +291,10 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
             sc = float(d.get("score", 100))
             col = score_color_pdf(sc)
             comp_rows.append([
-                Paragraph(str(d.get("label", comp)), cell_style),
+                Paragraph(_esc(d.get("label", comp)), cell_style),
                 Paragraph(f"<font color='{col}'><b>{sc:.1f}</b></font>", cell_style),
                 Paragraph(f"{d.get('coverage', 100):.0f}%", cell_style),
-                Paragraph(str(d.get("open_findings", 0)), cell_style),
+                Paragraph(str(d.get("active_issues", d.get("open_findings", 0))), cell_style),
             ])
         comp_table = Table(comp_rows, colWidths=[240, 100, 100, 100])
         comp_table.setStyle(
@@ -239,11 +310,11 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
 
     # Active Findings Table with Actionable Solutions
     findings = data.get("findings", [])
-    story.append(Paragraph(f"Daftar Masalah Server & Solusi Penanganan ({len(findings)})", h2_style))
+    story.append(Paragraph(f"Daftar Masalah Server &amp; Solusi Penanganan ({len(findings)})", h2_style))
     if findings:
         f_rows = [[
             Paragraph("<b>Tingkat</b>", cell_bold),
-            Paragraph("<b>Deskripsi Masalah & Solusi Penanganan</b>", cell_bold),
+            Paragraph("<b>Deskripsi Masalah &amp; Solusi Penanganan</b>", cell_bold),
             Paragraph("<b>Target Aset</b>", cell_bold),
             Paragraph("<b>Status</b>", cell_bold),
         ]]
@@ -258,15 +329,21 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
             else:
                 sev_color = "#075985"
 
-            title_text = str(f.get("title", ""))[:90]
-            rec = f.get("recommendation") or "Periksa konfigurasi dan lakukan pengawasan berkala."
-            combined_desc = f"<b>{title_text}</b><br/><font color='#0284c7'><b>💡 Solusi:</b></font> <font color='#334155'>{rec}</font>"
+            title_text = _esc(str(f.get("title", ""))[:120])
+            ev_raw = f.get("evidence")
+            ev_text = _esc(str(ev_raw)[:180]) if ev_raw else ""
+            rec = _esc(f.get("recommendation") or "Periksa konfigurasi dan lakukan pengawasan berkala.")
+            detail_part = f"<br/><font color='#475569'>Detail: {ev_text}</font>" if ev_text else ""
+            combined_desc = (
+                f"<b>{title_text}</b>{detail_part}"
+                f"<br/><font color='#0284c7'><b>[SOLUSI]</b></font> <font color='#334155'>{rec}</font>"
+            )
 
             f_rows.append([
-                Paragraph(f"<font color='{sev_color}'><b>{sev}</b></font>", cell_bold),
+                Paragraph(f"<font color='{sev_color}'><b>{_esc(sev)}</b></font>", cell_bold),
                 Paragraph(combined_desc, cell_style),
-                Paragraph(str(f.get("asset", "-"))[:30], cell_style),
-                Paragraph(str(f.get("status", "OPEN")), cell_style),
+                Paragraph(_esc(str(f.get("asset", "-"))[:32]), cell_style),
+                Paragraph(_esc(f.get("status", "OPEN")), cell_style),
             ])
         f_table = Table(f_rows, colWidths=[65, 305, 110, 60])
         f_table.setStyle(
@@ -280,8 +357,17 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
         )
         story.append(f_table)
     else:
-        story.append(Paragraph("<font color='#047857'><b>✅ Tidak ditemukan masalah aktif.</b> Server dalam kondisi aman.</font>", cell_style))
+        story.append(Paragraph("<font color='#047857'><b>[AMAN] Tidak ditemukan masalah aktif.</b> Server dalam kondisi aman.</font>", cell_style))
     story.append(Spacer(1, 10))
+
+    # Mitigated / Resolved Incidents Summary
+    resolved_count = int(data.get("resolved_findings_count", len(data.get("mitigated_findings", []))))
+    if resolved_count > 0:
+        story.append(Paragraph(
+            f"<font color='#047857'><b>[PERTAHANAN AKTIF]</b></font> {resolved_count} insiden/serangan berhasil ditangkal &amp; diselesaikan otomatis selama periode laporan.",
+            cell_style,
+        ))
+        story.append(Spacer(1, 8))
 
     # Hosting & Services Table
     services = data.get("services", [])
@@ -298,10 +384,10 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
             st_color = "#047857" if st == "active" or s.get("active") else "#b91c1c"
             st_text = "ACTIVE" if st == "active" or s.get("active") else "DOWN"
             srv_rows.append([
-                Paragraph(str(s.get("unit", "")), cell_style),
-                Paragraph(str(s.get("role", s.get("description", "-"))), cell_style),
+                Paragraph(_esc(s.get("unit", "")), cell_style),
+                Paragraph(_esc(s.get("role", s.get("description", "-"))), cell_style),
                 Paragraph(f"<font color='{st_color}'><b>{st_text}</b></font>", cell_style),
-                Paragraph(str(s.get("main_pid", "-")), cell_style),
+                Paragraph(_esc(s.get("main_pid", "-")), cell_style),
             ])
         srv_table = Table(srv_rows, colWidths=[180, 160, 100, 100])
         srv_table.setStyle(
@@ -318,7 +404,7 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
     # Websites & SSL Table
     websites = data.get("websites", [])
     if websites:
-        story.append(Paragraph("Ketersediaan Website & Sertifikat SSL", h2_style))
+        story.append(Paragraph("Ketersediaan Website &amp; Sertifikat SSL", h2_style))
         ws_rows = [[
             Paragraph("<b>Domain</b>", cell_bold),
             Paragraph("<b>Status Akses</b>", cell_bold),
@@ -329,10 +415,15 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
             resp_val = w.get("response_ms") or w.get("response_time_ms")
             resp_str = f"{resp_val:.0f}ms" if resp_val is not None else "-"
             ssl_val = w.get("ssl_days")
-            ssl_str = f"{ssl_val:.0f} hari" if ssl_val is not None else "N/A"
+            if ssl_val is None:
+                ssl_str = "N/A"
+            elif ssl_val <= 0:
+                ssl_str = f"KADALUARSA ({ssl_val:.0f}h)"
+            else:
+                ssl_str = f"{ssl_val:.0f} hari"
             ws_rows.append([
-                Paragraph(str(w.get("domain", "")), cell_style),
-                Paragraph(str(w.get("status_code", "-")), cell_style),
+                Paragraph(_esc(w.get("domain", "")), cell_style),
+                Paragraph(_esc(w.get("status_code", "-")), cell_style),
                 Paragraph(resp_str, cell_style),
                 Paragraph(ssl_str, cell_style),
             ])

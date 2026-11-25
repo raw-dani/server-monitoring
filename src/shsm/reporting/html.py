@@ -32,10 +32,13 @@ def render_html_report(data: Dict[str, Any]) -> str:
     s_label_id, _, s_fg, s_bg = get_status_info(sec_score)
 
     findings = data.get("findings", [])
+    mitigated = data.get("mitigated_findings", [])
+    resolved_count = int(data.get("resolved_findings_count", len(mitigated)))
+    action_items = data.get("action_items", [])
     components = data.get("components", {})
     services = data.get("services", [])
     websites = data.get("websites", [])
-    metrics = data.get("metrics_summary", {})
+    metrics = data.get("metrics_summary", {}) or {}
 
     # Determine overall condition for non-technical executive summary
     overall_min = min(health_score, sec_score)
@@ -380,6 +383,46 @@ def render_html_report(data: Dict[str, Any]) -> str:
     )
     out.append("</div>")
 
+    # Resource Performance Summary (CPU, Load, RAM, Disk)
+    has_metrics = any(metrics.get(k) is not None for k in ("cpu_avg", "load_avg", "mem_avg_avail", "disk_avg"))
+    if has_metrics:
+        def _fmt_pair(v1: Any, v2: Any, unit: str = "%") -> str:
+            s1 = f"{float(v1):.1f}{unit}" if v1 is not None else "-"
+            s2 = f"{float(v2):.1f}{unit}" if v2 is not None else "-"
+            return f"{s1} / {s2}"
+
+        l1 = f"{float(metrics['load_avg']):.2f}" if metrics.get("load_avg") is not None else "-"
+        l2 = f"{float(metrics['load_peak']):.2f}" if metrics.get("load_peak") is not None else "-"
+        out.append("<div class='section-title'>Ringkasan Performa Resource Server</div>")
+        out.append("<div class='section-desc'>Penggunaan resource server selama periode laporan (rata-rata dibandingkan puncak/minimum).</div>")
+        out.append("<table><thead><tr><th>CPU (Rata / Puncak)</th><th>Load Average (Rata / Puncak)</th><th>RAM Tersedia (Rata / Min)</th><th>Disk Root (Rata / Puncak)</th></tr></thead><tbody>")
+        out.append(
+            f"<tr>"
+            f"<td><strong>{_fmt_pair(metrics.get('cpu_avg'), metrics.get('cpu_peak'))}</strong></td>"
+            f"<td><strong>{l1} / {l2}</strong></td>"
+            f"<td><strong>{_fmt_pair(metrics.get('mem_avg_avail'), metrics.get('mem_min_avail'))}</strong></td>"
+            f"<td><strong>{_fmt_pair(metrics.get('disk_avg'), metrics.get('disk_peak'))}</strong></td>"
+            f"</tr>"
+        )
+        out.append("</tbody></table>")
+
+    # Prioritized Action Checklist
+    if action_items:
+        out.append("<div class='section-title'>Prioritas Tindakan yang Perlu Dilakukan</div>")
+        out.append("<div class='section-desc'>Urutan langkah terpenting untuk menjaga stabilitas dan keamanan server saat ini.</div>")
+        out.append("<table><thead><tr><th>Prioritas</th><th>Masalah Utama</th><th>Saran Tindakan</th></tr></thead><tbody>")
+        for act in action_items:
+            p = str(act.get("priority", "INFO")).upper()
+            p_cls = "badge-crit" if p == "CRITICAL" else ("badge-high" if p == "HIGH" else ("badge-med" if p == "MEDIUM" else "badge-low"))
+            out.append(
+                f"<tr>"
+                f"<td><span class='badge {p_cls}'>{html.escape(p)}</span></td>"
+                f"<td><strong>{html.escape(str(act.get('title', '')))}</strong></td>"
+                f"<td>{html.escape(str(act.get('action', '')))}</td>"
+                f"</tr>"
+            )
+        out.append("</tbody></table>")
+
     # Subsystem Breakdown Table
     if components:
         out.append("<div class='section-title'>Rincian Komponen & Layanan Server</div>")
@@ -389,7 +432,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
             sc = float(d.get("score", 100.0))
             cov = float(d.get("coverage", 100.0))
             lbl = html.escape(str(d.get("label", comp)))
-            f_count = int(d.get("open_findings", 0))
+            f_count = int(d.get("active_issues", d.get("open_findings", 0)))
 
             if sc >= 90:
                 badge = "<span class='badge badge-pass'>NORMAL</span>"
@@ -468,6 +511,25 @@ def render_html_report(data: Dict[str, Any]) -> str:
     else:
         out.append("<div class='empty-state'>✅ <strong>Tidak ada masalah aktif</strong>: Seluruh audit keamanan dan kesehatan server saat ini berada dalam kondisi aman.</div>")
 
+    # Mitigated / Auto-Blocked Attacks in Period
+    if resolved_count > 0:
+        out.append("<div class='section-title'>Aktivitas Pertahanan Aktif (Ditangkal / Diselesaikan)</div>")
+        out.append(f"<div class='section-desc'>Tercatat <strong>{resolved_count}</strong> insiden atau serangan yang berhasil ditangani otomatis dalam periode ini tanpa mengganggu layanan.</div>")
+        if mitigated:
+            out.append("<table><thead><tr><th>Insiden / Ancaman</th><th>Target / IP</th><th>Status Mitigasi</th></tr></thead><tbody>")
+            for mf in mitigated[:10]:
+                m_title = html.escape(str(mf.get("title", "-")))
+                m_asset = html.escape(str(mf.get("asset", "-")))
+                m_note = html.escape(str(mf.get("status_note") or "Diselesaikan otomatis"))
+                out.append(
+                    f"<tr>"
+                    f"<td><strong>{m_title}</strong></td>"
+                    f"<td><code>{m_asset}</code></td>"
+                    f"<td><span class='badge badge-pass'>RESOLVED</span> {m_note}</td>"
+                    f"</tr>"
+                )
+            out.append("</tbody></table>")
+
     # Hosting & Services Status
     if services:
         out.append("<div class='section-title'>Status Layanan Utama (Services)</div>")
@@ -501,19 +563,35 @@ def render_html_report(data: Dict[str, Any]) -> str:
             ssl_days = w.get("ssl_days")
 
             if ssl_days is not None:
-                ssl_text = f"{ssl_days:.0f} hari"
-                if ssl_days <= 7:
+                if ssl_days <= 0:
+                    ssl_text = f"Kadaluarsa ({ssl_days:.0f} hari)"
+                    ssl_badge = "<span class='badge badge-crit'>KADALUARSA</span>"
+                elif ssl_days <= 7:
+                    ssl_text = f"{ssl_days:.0f} hari"
                     ssl_badge = "<span class='badge badge-crit'>SEGERA PERPANJANG</span>"
                 elif ssl_days <= 14:
+                    ssl_text = f"{ssl_days:.0f} hari"
                     ssl_badge = "<span class='badge badge-med'>PERLU PERPANJANGAN</span>"
                 else:
+                    ssl_text = f"{ssl_days:.0f} hari"
                     ssl_badge = "<span class='badge badge-pass'>AMAN</span>"
             else:
                 ssl_text = "N/A"
                 ssl_badge = "<span class='badge badge-low'>TIDAK TERDETEKSI</span>"
 
-            # Check HTTP status
-            if str(code) in ("200", "301", "302") or "uptime" in str(code):
+            # Check HTTP status accurately (respect explicit ok flag & numeric uptime %)
+            explicit_ok = w.get("ok")
+            if explicit_ok is not None:
+                is_online = bool(explicit_ok)
+            elif "uptime" in str(code).lower():
+                try:
+                    is_online = float(str(code).split("%")[0].strip()) >= 95.0
+                except ValueError:
+                    is_online = False
+            else:
+                is_online = str(code).strip() in ("200", "201", "204", "301", "302", "307", "308")
+
+            if is_online:
                 st_badge = "<span class='badge badge-pass'>ONLINE</span>"
             else:
                 st_badge = "<span class='badge badge-crit'>KENDALA</span>"
@@ -521,7 +599,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
             out.append(
                 f"<tr>"
                 f"<td><strong>{dom}</strong></td>"
-                f"<td>{code} ({st_badge})</td>"
+                f"<td>{html.escape(code)} ({st_badge})</td>"
                 f"<td>{resp_ms}</td>"
                 f"<td>{ssl_text}</td>"
                 f"<td>{ssl_badge}</td>"

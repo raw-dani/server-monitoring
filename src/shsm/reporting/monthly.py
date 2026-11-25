@@ -10,69 +10,22 @@ from typing import Any, Dict, Optional, Tuple
 from shsm.core.context import Context
 from shsm.core.timeutils import format_local, monthly_period
 from shsm.notifications.smtp import SMTPTransport
+from shsm.reporting.common import assemble_report_data
 from shsm.reporting.html import render_html_report
 from shsm.reporting.pdf import generate_pdf_report
-from shsm.reporting.scoring import compute_scores
 
 
 def assemble_monthly_data(ctx: Context, start: datetime, end: datetime) -> Dict[str, Any]:
-    tz = ctx.tz
-    now = ctx.now()
-    hostname = socket.gethostname()
-
-    scores = compute_scores(ctx)
-    open_findings = ctx.findings.list(statuses=["OPEN", "ACKNOWLEDGED"], limit=50)
-    resolved_in_period = ctx.findings.list(statuses=["RESOLVED"], limit=50)
-    services = ctx.inventory.latest_services()
-    ssl_certs = ctx.inventory.latest_ssl()
-    ssl_map = {c["domain"]: c.get("days_remaining") for c in ssl_certs}
-
-    # Website uptime in period
-    websites_list = []
-    for site in ctx.inventory.active_websites():
-        dom = site["domain"]
-        ws_id = site["id"]
-        uptime_data = ctx.inventory.uptime(ws_id, "https", start, end)
-        uptime_pct = uptime_data.get("uptime_percent", 100.0) if uptime_data else 100.0
-        avg_ms = uptime_data.get("avg_ms") if uptime_data else None
-
-        websites_list.append({
-            "domain": dom,
-            "status_code": f"{uptime_pct:.1f}% uptime",
-            "response_ms": avg_ms,
-            "ssl_days": ssl_map.get(dom),
-        })
-
-    # Metric averages over the month
-    cpu_stats = ctx.metrics.period_stats("cpu.percent", start, end)
-    mem_stats = ctx.metrics.period_stats("memory.available_percent", start, end)
-    disk_stats = ctx.metrics.period_stats("disk.used_percent", start, end)
-
-    period_str = f"{format_local(start, tz, '%Y-%m-%d')} to {format_local(end, tz, '%Y-%m-%d')} ({tz})"
-    gen_time_str = format_local(now, tz, "%Y-%m-%d %H:%M:%S %Z")
-
-    return {
-        "kind": "monthly",
-        "title": "Server Health & Security Monthly Report",
-        "hostname": hostname,
-        "period": period_str,
-        "generated_at": gen_time_str,
-        "health_score": scores["health_score"],
-        "health_coverage": scores["health_coverage"],
-        "security_score": scores["security_score"],
-        "security_coverage": scores["security_coverage"],
-        "components": scores["components"],
-        "findings": open_findings,
-        "resolved_findings_count": len(resolved_in_period),
-        "services": services,
-        "websites": websites_list,
-        "metrics_summary": {
-            "cpu_avg": cpu_stats.get("avg") if cpu_stats else None,
-            "cpu_peak": cpu_stats.get("max") if cpu_stats else None,
-            "mem_avg_avail": mem_stats.get("avg") if mem_stats else None,
-            "disk_avg": disk_stats.get("avg") if disk_stats else None,
-        },
-    }
+    period_str = f"{format_local(start, ctx.tz, '%Y-%m-%d')} to {format_local(end, ctx.tz, '%Y-%m-%d')} ({ctx.tz})"
+    return assemble_report_data(
+        ctx,
+        kind="monthly",
+        title="Server Health & Security Monthly Report",
+        period_str=period_str,
+        start=start,
+        end=end,
+        use_period_uptime=True,
+    )
 
 
 def generate_monthly_report(

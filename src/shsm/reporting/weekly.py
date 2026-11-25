@@ -10,55 +10,22 @@ from typing import Any, Dict, Optional, Tuple
 from shsm.core.context import Context
 from shsm.core.timeutils import format_local, weekly_period
 from shsm.notifications.smtp import SMTPTransport
+from shsm.reporting.common import assemble_report_data
 from shsm.reporting.html import render_html_report
 from shsm.reporting.pdf import generate_pdf_report
-from shsm.reporting.scoring import compute_scores
 
 
 def assemble_weekly_data(ctx: Context, start: datetime, end: datetime) -> Dict[str, Any]:
-    tz = ctx.tz
-    now = ctx.now()
-    hostname = socket.gethostname()
-
-    scores = compute_scores(ctx)
-    open_findings = ctx.findings.list(statuses=["OPEN", "ACKNOWLEDGED"], limit=50)
-    services = ctx.inventory.latest_services()
-    ssl_certs = ctx.inventory.latest_ssl()
-    ssl_map = {c["domain"]: c.get("days_remaining") for c in ssl_certs}
-
-    websites_list = []
-    for site in ctx.inventory.active_websites():
-        dom = site["domain"]
-        ws_id = site["id"]
-        last_check = ctx.db.query_one(
-            "SELECT status_code, response_ms, ok FROM website_checks WHERE website_id=? ORDER BY id DESC LIMIT 1",
-            (ws_id,),
-        )
-        websites_list.append({
-            "domain": dom,
-            "status_code": last_check["status_code"] if last_check else "-",
-            "response_ms": last_check["response_ms"] if last_check else None,
-            "ssl_days": ssl_map.get(dom),
-        })
-
-    period_str = f"{format_local(start, tz, '%Y-%m-%d')} to {format_local(end, tz, '%Y-%m-%d')} ({tz})"
-    gen_time_str = format_local(now, tz, "%Y-%m-%d %H:%M:%S %Z")
-
-    return {
-        "kind": "weekly",
-        "title": "Server Health & Security Weekly Report",
-        "hostname": hostname,
-        "period": period_str,
-        "generated_at": gen_time_str,
-        "health_score": scores["health_score"],
-        "health_coverage": scores["health_coverage"],
-        "security_score": scores["security_score"],
-        "security_coverage": scores["security_coverage"],
-        "components": scores["components"],
-        "findings": open_findings,
-        "services": services,
-        "websites": websites_list,
-    }
+    period_str = f"{format_local(start, ctx.tz, '%Y-%m-%d')} to {format_local(end, ctx.tz, '%Y-%m-%d')} ({ctx.tz})"
+    return assemble_report_data(
+        ctx,
+        kind="weekly",
+        title="Server Health & Security Weekly Report",
+        period_str=period_str,
+        start=start,
+        end=end,
+        use_period_uptime=False,
+    )
 
 
 def generate_weekly_report(

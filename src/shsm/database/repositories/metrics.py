@@ -105,14 +105,24 @@ class MetricsRepo:
         ]
 
     def period_stats(self, metric: str, start: datetime, end: datetime, asset: str = "") -> Optional[Dict[str, float]]:
+        start_iso, end_iso = to_iso(start), to_iso(end)
         row = self.db.query_one(
             "SELECT SUM(samples) AS n, SUM(avg*samples)/SUM(samples) AS avg, MIN(min) AS min, MAX(max) AS max "
             "FROM metric_rollups_hourly WHERE metric=? AND asset=? AND bucket_start>=? AND bucket_start<?",
-            (metric, asset, to_iso(start), to_iso(end)),
+            (metric, asset, start_iso, end_iso),
         )
-        if not row or not row["n"]:
+        if row and row["n"]:
+            return {"avg": row["avg"], "min": row["min"], "max": row["max"], "samples": row["n"]}
+
+        # Fallback to raw metric_samples when hourly rollups have not yet run (e.g., today's daily digest)
+        raw = self.db.query_one(
+            "SELECT COUNT(*) AS n, AVG(value) AS avg, MIN(value) AS min, MAX(value) AS max "
+            "FROM metric_samples WHERE metric=? AND asset=? AND ts>=? AND ts<?",
+            (metric, asset, start_iso, end_iso),
+        )
+        if not raw or not raw["n"]:
             return None
-        return {"avg": row["avg"], "min": row["min"], "max": row["max"], "samples": row["n"]}
+        return {"avg": raw["avg"], "min": raw["min"], "max": raw["max"], "samples": raw["n"]}
 
     # ---------------------------------------------------------------- retention
     def purge(self, now: datetime, raw_days: int, hourly_days: int, daily_months: int) -> Dict[str, int]:

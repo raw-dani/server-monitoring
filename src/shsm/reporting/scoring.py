@@ -64,6 +64,7 @@ def calculate_component_score(
     # Score calculation from 100 with deductions
     score = 100.0
     deductions: Dict[str, float] = {}
+    finding_check_ids = {f["check_id"] for f in comp_findings}
 
     for f in comp_findings:
         sev = f.get("severity", Severity.INFO.value)
@@ -82,13 +83,22 @@ def calculate_component_score(
         # Bound duplicate penalties per check
         deductions[key] = max(deductions.get(key, 0.0), penalty)
 
-    # Check for direct CRITICAL / WARNING check status without finding
+    # Check for direct CRITICAL / WARNING check status only when not already covered by an open finding
+    # (prevents double-deducting -40 and -30 for the exact same issue)
+    failed_checks_only = 0
     for c in comp_checks:
+        cid = c.get("check_id", "")
+        if cid in finding_check_ids:
+            continue
         st = c.get("status")
         if st == CheckStatus.CRITICAL.value:
-            deductions[f"check_{c['check_id']}_crit"] = 30.0
+            if f"check_{cid}_crit" not in deductions:
+                failed_checks_only += 1
+            deductions[f"check_{cid}_crit"] = 30.0
         elif st == CheckStatus.WARNING.value:
-            deductions[f"check_{c['check_id']}_warn"] = 10.0
+            if f"check_{cid}_warn" not in deductions:
+                failed_checks_only += 1
+            deductions[f"check_{cid}_warn"] = 10.0
 
     total_penalty = sum(deductions.values())
     final_score = max(0.0, score - total_penalty)
@@ -97,6 +107,7 @@ def calculate_component_score(
         "score": round(final_score, 1),
         "coverage": round(coverage_pct, 1),
         "open_findings": len(comp_findings),
+        "active_issues": len(comp_findings) + failed_checks_only,
         "conclusive_checks": conclusive_expected,
         "expected_checks": len(expected),
     }
