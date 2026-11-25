@@ -66,7 +66,7 @@ if ! $PYTHON_BIN -m venv --help &>/dev/null; then
 fi
 
 # Optional security tools check
-for tool in fail2ban-client wp lynis rkhunter clamscan; do
+for tool in fail2ban-client ipset wp lynis rkhunter clamscan; do
     if command -v "$tool" &>/dev/null; then
         log_ok "Detected tool: $tool"
     else
@@ -275,26 +275,30 @@ if [ -d "$SCRIPT_DIR/systemd" ]; then
     cp "$SCRIPT_DIR/systemd/"*.timer /etc/systemd/system/
     systemctl daemon-reload
 
-    log_info "Enabling all 21 SHSM timers..."
+    log_info "Enabling all SHSM timers and real-time watch daemon..."
     systemctl reset-failed 'shsm-*' 2>/dev/null || true
     for timer in /etc/systemd/system/shsm-*.timer; do
         timer_name=$(basename "$timer")
         systemctl enable --now "$timer_name"
     done
-    log_ok "All systemd timers enabled and started."
+    if [ -f /etc/systemd/system/shsm-watch.service ]; then
+        systemctl enable --now shsm-watch.service
+    fi
+    log_ok "All systemd timers and shsm-watch.service enabled and started."
 else
-    log_warn "Systemd directory not found. Please run 'shsm schedule install' or generate units."
+    log_warn "Systemd directory not found. Please run 'shsm systemd install' to generate units."
 fi
 
-# 10. Run Self-Test
+# 10. Run Self-Test (as shsm user so log/db ownership stays non-root)
 log_info "Executing self-test verification..."
-/usr/local/bin/shsm doctor || log_warn "Self-test finished with warnings. Please review the output above."
+sudo -u "$SHSM_USER" /usr/local/bin/shsm doctor || log_warn "Self-test finished with warnings. Please review the output above."
 
 log_ok "=================================================================="
 log_ok " SHSM Installation Completed Successfully!"
 log_ok " Configuration:  $CONFIG_DIR/config.yaml"
 log_ok " Database:       $DATA_DIR/monitoring.db"
 log_ok " Logs:           $LOG_DIR/shsm.log"
-log_ok " CLI:            shsm --help"
+log_ok " CLI:            sudo -u shsm shsm --help"
+log_ok " Watch Daemon:   systemctl status shsm-watch.service"
 log_ok " System Timers:  systemctl list-timers 'shsm-*'"
 log_ok "=================================================================="
