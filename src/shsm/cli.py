@@ -216,14 +216,28 @@ def cmd_doctor(click_ctx: click.Context) -> None:
     else:
         click.secho(f"  [FAIL] SQLite database integrity check: {qcheck}", fg="red")
 
-    # 4. Binaries check
-    tools = ["systemctl", "mariadb", "mysql", "wp", "clamscan", "lynis", "rkhunter", "ufw"]
+    # 4. Binaries check (firewall tools are evaluated dynamically below)
+    tools = ["systemctl", "mariadb", "mysql", "wp", "clamscan", "lynis", "rkhunter"]
     for t in tools:
         p = runner.which(t)
         if p:
             click.secho(f"  [PASS] Found binary {t} at {p}", fg="green")
         else:
             click.secho(f"  [INFO] Optional tool {t} not found in PATH", fg="white")
+
+    # 5. Active firewall & active defense tools (auto-detected)
+    from shsm.security.firewall import detect_active_firewall, find_firewall_binary
+
+    fw_name, fw_active, fw_desc = detect_active_firewall(app_ctx)
+    if fw_active:
+        click.secho(f"  [PASS] Active firewall backend: {fw_name.upper()} ({fw_desc})", fg="green")
+    else:
+        click.secho(f"  [WARN] Firewall: {fw_desc}", fg="yellow")
+
+    for fw_tool in ("csf", "ufw", "firewall-cmd", "nft", "iptables", "ipset", "fail2ban-client"):
+        fp = find_firewall_binary(app_ctx, fw_tool)
+        if fp:
+            click.secho(f"  [PASS] Found defense tool {fw_tool} at {fp}", fg="green")
 
 
 # ---------------------------------------------------------------- config

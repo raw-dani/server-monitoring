@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from shsm.core.context import Context
 from shsm.security import fail2ban
 from shsm.security.fail2ban import _run_with_sudo_fallback, is_valid_ip
+from shsm.security.firewall import detect_active_firewall, find_firewall_binary
 
 log = logging.getLogger(__name__)
 
@@ -332,7 +333,7 @@ def unban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple
         messages.append("Fail2Ban: client not installed, skipped")
 
     # 2. Check and remove from ipset if present
-    ipset_bin = ctx.runner.which("ipset") or ctx.runner.which("/sbin/ipset") or ctx.runner.which("/usr/sbin/ipset")
+    ipset_bin = find_firewall_binary(ctx, "ipset", ("/sbin/ipset", "/usr/sbin/ipset", "/usr/bin/ipset"))
     if ipset_bin and "/" not in clean_ip:
         set_name = _IPSET_V6 if ":" in clean_ip else _IPSET_V4
         res_del = _run_with_sudo_fallback(ctx, [ipset_bin, "del", set_name, clean_ip], timeout=6)
@@ -341,7 +342,7 @@ def unban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple
             messages.append(f"ipset: Removed {clean_ip} from {set_name}")
 
     # 3. Check and remove from CSF deny/tempban if available
-    csf_bin = ctx.runner.which("csf") or ctx.runner.which("/usr/sbin/csf")
+    csf_bin = find_firewall_binary(ctx, "csf", ("/usr/sbin/csf", "/usr/local/sbin/csf", "/sbin/csf"))
     if csf_bin:
         res_tr = _run_with_sudo_fallback(ctx, [csf_bin, "-tr", clean_ip], timeout=10)
         res_dr = _run_with_sudo_fallback(ctx, [csf_bin, "-dr", clean_ip], timeout=10)
@@ -350,14 +351,14 @@ def unban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple
             messages.append(f"CSF: Removed {clean_ip} from temp/permanent deny")
 
     # 4. Check and remove from UFW / Firewalld if active
-    ufw_bin = ctx.runner.which("ufw") or ctx.runner.which("/usr/sbin/ufw")
+    ufw_bin = find_firewall_binary(ctx, "ufw", ("/usr/sbin/ufw", "/usr/bin/ufw"))
     if ufw_bin:
         res_ufw = _run_with_sudo_fallback(ctx, [ufw_bin, "delete", "deny", "from", clean_ip], timeout=10)
         if res_ufw.ok and "deleted" in (res_ufw.stdout or "").lower():
             any_success = True
             messages.append(f"UFW: Deleted deny rule for {clean_ip}")
 
-    fw_bin = ctx.runner.which("firewall-cmd") or ctx.runner.which("/usr/bin/firewall-cmd")
+    fw_bin = find_firewall_binary(ctx, "firewall-cmd", ("/usr/bin/firewall-cmd", "/usr/sbin/firewall-cmd"))
     if fw_bin:
         fam = "ipv6" if ":" in clean_ip else "ipv4"
         rich_rule = f'rule family="{fam}" source address="{clean_ip}" drop'
@@ -396,7 +397,7 @@ def _ban_via_csf(ctx: Context, clean_ip: str, ttl_seconds: int, reason: str) -> 
     backend = str(ctx.config.get("security.firewall_backend", "auto")).lower()
     if backend not in ("auto", "csf"):
         return False, "csf backend disabled"
-    csf_bin = ctx.runner.which("csf") or ctx.runner.which("/usr/sbin/csf")
+    csf_bin = find_firewall_binary(ctx, "csf", ("/usr/sbin/csf", "/usr/local/sbin/csf", "/sbin/csf"))
     if not csf_bin:
         return False, "csf binary not found"
     if ttl_seconds > 0:
@@ -413,7 +414,7 @@ def _ban_via_ipset(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[bool,
     """Insert IP into O(1) kernel ipset hash table and ensure iptables match rule exists."""
     if not bool(ctx.config.get("security.ipset_enabled", True)) or "/" in clean_ip:
         return False, "ipset disabled or CIDR target"
-    ipset_bin = ctx.runner.which("ipset") or ctx.runner.which("/sbin/ipset") or ctx.runner.which("/usr/sbin/ipset")
+    ipset_bin = find_firewall_binary(ctx, "ipset", ("/sbin/ipset", "/usr/sbin/ipset", "/usr/bin/ipset"))
     if not ipset_bin:
         return False, "ipset binary not found"
 
@@ -421,7 +422,7 @@ def _ban_via_ipset(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[bool,
     set_name = _IPSET_V6 if is_v6 else _IPSET_V4
     family = "inet6" if is_v6 else "inet"
     tool_name = "ip6tables" if is_v6 else "iptables"
-    ipt_bin = ctx.runner.which(tool_name) or ctx.runner.which(f"/sbin/{tool_name}") or ctx.runner.which(f"/usr/sbin/{tool_name}")
+    ipt_bin = find_firewall_binary(ctx, tool_name, (f"/sbin/{tool_name}", f"/usr/sbin/{tool_name}", f"/usr/bin/{tool_name}"))
     if not ipt_bin:
         return False, f"{tool_name} binary not found"
 
@@ -450,7 +451,7 @@ def _ban_via_ufw(ctx: Context, clean_ip: str, reason: str) -> Tuple[bool, str]:
     backend = str(ctx.config.get("security.firewall_backend", "auto")).lower()
     if backend not in ("auto", "ufw"):
         return False, "ufw backend disabled"
-    ufw_bin = ctx.runner.which("ufw") or ctx.runner.which("/usr/sbin/ufw")
+    ufw_bin = find_firewall_binary(ctx, "ufw", ("/usr/sbin/ufw", "/usr/bin/ufw"))
     if not ufw_bin:
         return False, "ufw binary not found"
     st = _run_with_sudo_fallback(ctx, [ufw_bin, "status"], timeout=6)
@@ -467,7 +468,7 @@ def _ban_via_firewalld(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[b
     backend = str(ctx.config.get("security.firewall_backend", "auto")).lower()
     if backend not in ("auto", "firewalld"):
         return False, "firewalld backend disabled"
-    fw_bin = ctx.runner.which("firewall-cmd") or ctx.runner.which("/usr/bin/firewall-cmd")
+    fw_bin = find_firewall_binary(ctx, "firewall-cmd", ("/usr/bin/firewall-cmd", "/usr/sbin/firewall-cmd"))
     if not fw_bin:
         return False, "firewall-cmd binary not found"
     st = _run_with_sudo_fallback(ctx, [fw_bin, "--state"], timeout=6)
@@ -532,67 +533,51 @@ def ban_ip_unified(
     is_v6 = ":" in clean_ip
     tool_name = "ip6tables" if is_v6 else "iptables"
 
-    if use_iptables:
-        # 1. Prefer CSF temp-deny if active (survives csf -r and auto-expires)
-        csf_ok, csf_msg = _ban_via_csf(ctx, clean_ip, ttl, ban_reason)
-        if csf_ok:
-            return True, csf_msg
+    def _apply_kernel_ban(prefix: str = "") -> Tuple[bool, str]:
+        fw_name, fw_active, _ = detect_active_firewall(ctx)
+        # Try matching active firewall backend first, then ipset/fallbacks
+        attempts: List[Any] = []
+        if fw_name == "csf" and fw_active:
+            attempts.append(lambda: _ban_via_csf(ctx, clean_ip, ttl, ban_reason))
+        elif fw_name == "ufw" and fw_active:
+            attempts.append(lambda: _ban_via_ipset(ctx, clean_ip, ttl))
+            attempts.append(lambda: _ban_via_ufw(ctx, clean_ip, ban_reason))
+        elif fw_name == "firewalld" and fw_active:
+            attempts.append(lambda: _ban_via_firewalld(ctx, clean_ip, ttl))
+            attempts.append(lambda: _ban_via_ipset(ctx, clean_ip, ttl))
+        else:
+            attempts.extend([
+                lambda: _ban_via_csf(ctx, clean_ip, ttl, ban_reason),
+                lambda: _ban_via_ipset(ctx, clean_ip, ttl),
+                lambda: _ban_via_ufw(ctx, clean_ip, ban_reason),
+                lambda: _ban_via_firewalld(ctx, clean_ip, ttl),
+            ])
 
-        # 2. Prefer O(1) ipset hash table with TTL when available
-        ipset_ok, ipset_msg = _ban_via_ipset(ctx, clean_ip, ttl)
-        if ipset_ok:
-            return True, ipset_msg
+        for fn in attempts:
+            ok_b, msg_b = fn()
+            if ok_b:
+                return True, f"{prefix}{msg_b}"
 
-        # 3. Try UFW / Firewalld native drop if active
-        ufw_ok, ufw_msg = _ban_via_ufw(ctx, clean_ip, ban_reason)
-        if ufw_ok:
-            return True, ufw_msg
-
-        fwd_ok, fwd_msg = _ban_via_firewalld(ctx, clean_ip, ttl)
-        if fwd_ok:
-            return True, fwd_msg
-
-        # 4. Direct iptables / ip6tables DROP fallback
-        ipt_bin = ctx.runner.which(tool_name) or ctx.runner.which(f"/sbin/{tool_name}") or ctx.runner.which(f"/usr/sbin/{tool_name}")
+        ipt_bin = find_firewall_binary(ctx, tool_name, (f"/sbin/{tool_name}", f"/usr/sbin/{tool_name}", f"/usr/bin/{tool_name}"))
         if not ipt_bin:
             return False, f"{tool_name} binary not found"
         res_c = _run_with_sudo_fallback(ctx, [ipt_bin, "-C", "INPUT", "-s", clean_ip, "-j", "DROP"])
         if res_c.ok:
-            return True, f"IP {clean_ip} is already blocked in {tool_name}"
+            return True, f"{prefix}IP {clean_ip} is already blocked in {tool_name}"
         res_i = _run_with_sudo_fallback(ctx, [ipt_bin, "-I", "INPUT", "-s", clean_ip, "-j", "DROP"])
         if res_i.ok:
-            return True, f"Successfully inserted DROP rule for {clean_ip} in {tool_name}"
+            return True, f"{prefix}Successfully inserted DROP rule for {clean_ip} in {tool_name}"
         return False, f"Failed to insert {tool_name} DROP rule: {res_i.stderr or res_i.stdout}"
 
-    # Default: Try Fail2Ban first, fallback to CSF/ipset/UFW/Firewalld/iptables if Fail2Ban is unavailable
+    if use_iptables:
+        return _apply_kernel_ban()
+
+    # Default: Try Fail2Ban first, fallback to detected firewall / ipset / iptables
     f_ok, f_msg = fail2ban.ban_ip(ctx, clean_ip, jail=jail)
     if f_ok:
         return True, f_msg
 
-    csf_ok, csf_msg = _ban_via_csf(ctx, clean_ip, ttl, ban_reason)
-    if csf_ok:
-        return True, f"{f_msg}. Fallback: {csf_msg}"
-
-    ipset_ok, ipset_msg = _ban_via_ipset(ctx, clean_ip, ttl)
-    if ipset_ok:
-        return True, f"{f_msg}. Fallback: {ipset_msg}"
-
-    ufw_ok, ufw_msg = _ban_via_ufw(ctx, clean_ip, ban_reason)
-    if ufw_ok:
-        return True, f"{f_msg}. Fallback: {ufw_msg}"
-
-    fwd_ok, fwd_msg = _ban_via_firewalld(ctx, clean_ip, ttl)
-    if fwd_ok:
-        return True, f"{f_msg}. Fallback: {fwd_msg}"
-
-    ipt_bin = ctx.runner.which(tool_name) or ctx.runner.which(f"/sbin/{tool_name}") or ctx.runner.which(f"/usr/sbin/{tool_name}")
-    if ipt_bin:
-        res_c = _run_with_sudo_fallback(ctx, [ipt_bin, "-C", "INPUT", "-s", clean_ip, "-j", "DROP"])
-        if res_c.ok:
-            return True, f"{f_msg}. Already dropped in {tool_name}"
-        res_i = _run_with_sudo_fallback(ctx, [ipt_bin, "-I", "INPUT", "-s", clean_ip, "-j", "DROP"])
-        if res_i.ok:
-            return True, f"{f_msg}. Fallback: Successfully dropped in {tool_name}"
-        return False, f"Fail2Ban failed ({f_msg}) and {tool_name} fallback failed: {res_i.stderr}"
-
-    return False, f_msg
+    ok_fb, msg_fb = _apply_kernel_ban(prefix=f"{f_msg}. Fallback: ")
+    if ok_fb:
+        return True, msg_fb
+    return False, f"Fail2Ban failed ({f_msg}) and {msg_fb}"

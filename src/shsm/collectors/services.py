@@ -120,8 +120,55 @@ def collect(ctx: Context) -> CollectorOutput:
 
     # 1. Evaluate configured roles
     for role, spec in roles.items():
-        unit = discover_unit_for_role(ctx, role, spec, all_units=prefetched_units)
         check_id = f"service.{role}"
+
+        # Special handling for 'firewall': resolve against the ACTUAL active firewall backend
+        # so dormant Ubuntu ufw.service (active exited, PID 0) never masks active CSF/Firewalld/nftables.
+        if role == "firewall":
+            from shsm.security.firewall import detect_active_firewall
+
+            fw_name, fw_active, fw_desc = detect_active_firewall(ctx)
+            fw_unit_map = {
+                "csf": ["lfd", "csf"],
+                "ufw": ["ufw"],
+                "firewalld": ["firewalld"],
+                "nftables": ["nftables"],
+                "iptables": ["netfilter-persistent", "iptables"],
+            }
+            if fw_name in fw_unit_map:
+                role_spec = dict(spec)
+                role_spec["patterns"] = fw_unit_map[fw_name]
+                unit = discover_unit_for_role(ctx, role, role_spec, all_units=prefetched_units)
+                if not unit and fw_active:
+                    # Try explicit systemctl show in case unit wasn't listed by list-units
+                    for cand in fw_unit_map[fw_name]:
+                        cand_u = f"{cand}.service"
+                        c_info = _show_unit(ctx, cand_u)
+                        if c_info and c_info.get("ActiveState") == "active":
+                            unit = cand_u
+                            break
+                if not unit and fw_active:
+                    # Active kernel/init firewall without systemd unit (e.g. legacy CSF or pure iptables)
+                    ctx.inventory.add_service_check(now, {
+                        "unit": f"{fw_name}.service",
+                        "role": role,
+                        "load_state": "loaded",
+                        "active_state": "active",
+                        "sub_state": "running",
+                        "main_pid": 0,
+                        "started_at": None,
+                        "uptime_seconds": None,
+                        "n_restarts": 0,
+                        "result": "success",
+                        "restart_detected": False,
+                        "detail": fw_desc,
+                    })
+                    out.check(check_id, CATEGORY, CheckStatus.PASS, fw_desc, asset=fw_name, source=SOURCE)
+                    continue
+            else:
+                unit = discover_unit_for_role(ctx, role, spec, all_units=prefetched_units)
+        else:
+            unit = discover_unit_for_role(ctx, role, spec, all_units=prefetched_units)
 
         if not unit:
             if spec.get("required", False):

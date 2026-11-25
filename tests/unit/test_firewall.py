@@ -57,3 +57,49 @@ def test_detect_none(test_db, sample_config):
     fw_name, is_active, desc = detect_active_firewall(ctx)
     assert is_active is False
     assert fw_name == "none"
+
+
+def test_services_collector_prefers_active_csf_over_ufw(test_db, sample_config):
+    from unittest.mock import patch
+
+    from shsm.collectors import services
+    from shsm.core.subprocesses import FakeRunner
+
+    runner = FakeRunner(available={"systemctl", "csf", "sudo"})
+    runner.responses["systemctl list-units"] = CommandResult(
+        [], 0,
+        stdout="ufw.service loaded active exited Uncomplicated firewall\nlfd.service loaded active running ConfigServer Security & Firewall\n",
+    )
+    runner.responses["systemctl show lfd.service"] = CommandResult(
+        [], 0,
+        stdout="Id=lfd.service\nLoadState=loaded\nActiveState=active\nSubState=running\nMainPID=1234\nNRestarts=0\nResult=success\n",
+    )
+    runner.responses["systemctl list-units --state=failed"] = CommandResult([], 0, stdout="")
+
+    sample_config.data["services"]["roles"] = {
+        "firewall": {"patterns": ["csf", "lfd", "ufw"], "units": [], "required": False},
+    }
+    ctx = Context(sample_config, test_db, runner=runner)
+    with patch("shsm.security.firewall.detect_active_firewall", return_value=("csf", True, "CSF active")):
+        out = services.collect(ctx)
+
+    chk = next(c for c in out.checks if c.check_id == "service.firewall")
+    assert chk.asset == "lfd.service"
+    latest = ctx.inventory.latest_services()
+    assert len(latest) == 1
+    assert latest[0]["unit"] == "lfd.service"
+
+
+def test_doctor_reports_active_firewall_dynamically(test_db, sample_config):
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from shsm.cli import main
+
+    ctx = Context(sample_config, test_db, runner=FakeFirewallRunner("csf"))
+    with patch("shsm.cli.get_context", return_value=ctx):
+        res = CliRunner().invoke(main, ["doctor"])
+    assert res.exit_code == 0
+    assert "Active firewall backend: CSF" in res.output
+    assert "Found defense tool csf" in res.output
