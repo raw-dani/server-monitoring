@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import timedelta
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from shsm.collectors.base import join_limited
 from shsm.core.context import Context
@@ -78,11 +78,20 @@ def discover_unit_for_role(
             u_name = parts[1] if parts[0] in ("●", "*") and len(parts) > 1 else parts[0]
             unit_names.append(u_name)
 
-    for unit_name in unit_names:
-        base_name = (unit_name[:-8] if unit_name.endswith(".service") else unit_name).lower()
-        for pat in patterns:
-            pat_lower = pat.lower()
-            if pat_lower == base_name or pat_lower in base_name:
+    # 1. Exact unit-name match in configured pattern priority order (e.g. 'ssh.service' beats 'fastapi_ssh_server.service')
+    for pat in patterns:
+        pat_lower = pat.lower()
+        for unit_name in unit_names:
+            base_name = (unit_name[:-8] if unit_name.endswith(".service") else unit_name).lower()
+            if pat_lower == base_name:
+                return unit_name
+
+    # 2. Substring fallback only when no exact match exists
+    for pat in patterns:
+        pat_lower = pat.lower()
+        for unit_name in unit_names:
+            base_name = (unit_name[:-8] if unit_name.endswith(".service") else unit_name).lower()
+            if pat_lower in base_name:
                 return unit_name
 
     return None

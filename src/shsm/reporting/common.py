@@ -46,6 +46,30 @@ def assemble_metrics_summary(ctx: Context, start: datetime, end: datetime) -> Di
     }
 
 
+def is_website_online(w: Dict[str, Any]) -> bool:
+    """Evaluate website health consistently across HTML and PDF renderers."""
+    explicit_ok = w.get("ok")
+    if explicit_ok is not None:
+        return bool(explicit_ok)
+    code = str(w.get("status_code") or "").strip()
+    if "uptime" in code.lower():
+        try:
+            return float(code.split("%")[0].strip()) >= 95.0
+        except ValueError:
+            return False
+    return code in ("200", "201", "204", "301", "302", "307", "308")
+
+
+def sort_websites_for_report(websites: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sort websites so failing or SSL-expiring sites appear first for rapid triage."""
+    def _sort_key(w: Dict[str, Any]) -> tuple[int, int, str]:
+        online = 0 if not is_website_online(w) else 1
+        ssl_days = w.get("ssl_days")
+        ssl_bad = 0 if (ssl_days is not None and ssl_days <= 14) else 1
+        return (online, ssl_bad, str(w.get("domain", "")))
+    return sorted(websites, key=_sort_key)
+
+
 def assemble_websites_summary(
     ctx: Context,
     start: datetime,

@@ -21,6 +21,7 @@ except TypeError:
     hashlib.md5 = _compat_md5  # type: ignore[assignment]
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import (
@@ -31,6 +32,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+from shsm.reporting.common import is_website_online, sort_websites_for_report
 
 
 def _esc(val: Any) -> str:
@@ -136,33 +139,57 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
     h_col = score_color_pdf(health_score)
     s_col = score_color_pdf(sec_score)
 
+    card_title_style = ParagraphStyle(
+        "ScoreCardTitle", parent=styles["Normal"], fontSize=9.5, leading=13,
+        alignment=TA_CENTER, fontName="Helvetica-Bold", textColor=colors.HexColor("#0f172a"),
+    )
+    card_num_style = ParagraphStyle(
+        "ScoreCardNum", parent=styles["Normal"], fontSize=22, leading=28,
+        alignment=TA_CENTER, fontName="Helvetica-Bold",
+    )
+    card_status_style = ParagraphStyle(
+        "ScoreCardStatus", parent=styles["Normal"], fontSize=8.5, leading=12,
+        alignment=TA_CENTER, fontName="Helvetica-Bold", textColor=colors.HexColor("#1e293b"),
+    )
+    card_cov_style = ParagraphStyle(
+        "ScoreCardCov", parent=styles["Normal"], fontSize=7.5, leading=10,
+        alignment=TA_CENTER, textColor=colors.HexColor("#64748b"),
+    )
+
     score_data = [
         [
-            Paragraph(
-                f"<b>Kesehatan Server (Health)</b><br/>"
-                f"<font size='22' color='{h_col}'><b>{health_score:.1f}</b></font><br/>"
-                f"<b>{status_label(health_score)}</b><br/>"
-                f"<font size='7' color='#64748b'>Cakupan Audit: {health_cov:.0f}%</font>",
-                styles["Normal"],
-            ),
-            Paragraph(
-                f"<b>Keamanan Server (Security)</b><br/>"
-                f"<font size='22' color='{s_col}'><b>{sec_score:.1f}</b></font><br/>"
-                f"<b>{status_label(sec_score)}</b><br/>"
-                f"<font size='7' color='#64748b'>Cakupan Audit: {sec_cov:.0f}%</font>",
-                styles["Normal"],
-            ),
-        ]
+            Paragraph("Kesehatan Server (Health)", card_title_style),
+            Paragraph("Keamanan Server (Security)", card_title_style),
+        ],
+        [
+            Paragraph(f"<font color='{h_col}'>{health_score:.1f}</font>", card_num_style),
+            Paragraph(f"<font color='{s_col}'>{sec_score:.1f}</font>", card_num_style),
+        ],
+        [
+            Paragraph(status_label(health_score), card_status_style),
+            Paragraph(status_label(sec_score), card_status_style),
+        ],
+        [
+            Paragraph(f"Cakupan Audit: {health_cov:.0f}%", card_cov_style),
+            Paragraph(f"Cakupan Audit: {sec_cov:.0f}%", card_cov_style),
+        ],
     ]
     score_table = Table(score_data, colWidths=[270, 270])
     score_table.setStyle(
         TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
             ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+            ("LINEAFTER", (0, 0), (0, -1), 0.75, colors.HexColor("#cbd5e1")),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, 0), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+            ("TOPPADDING", (0, 1), (-1, 1), 2),
+            ("BOTTOMPADDING", (0, 1), (-1, 1), 2),
+            ("TOPPADDING", (0, 2), (-1, 2), 2),
+            ("BOTTOMPADDING", (0, 2), (-1, 2), 2),
+            ("TOPPADDING", (0, 3), (-1, 3), 1),
+            ("BOTTOMPADDING", (0, 3), (-1, 3), 8),
         ])
     )
     story.append(score_table)
@@ -404,30 +431,43 @@ def generate_pdf_report(data: Dict[str, Any], output_path: str) -> str:
     # Websites & SSL Table
     websites = data.get("websites", [])
     if websites:
-        story.append(Paragraph("Ketersediaan Website &amp; Sertifikat SSL", h2_style))
+        sorted_ws = sort_websites_for_report(websites)
+        online_cnt = sum(1 for w in sorted_ws if is_website_online(w))
+        issue_cnt = len(sorted_ws) - online_cnt
+        story.append(Paragraph(
+            f"Ketersediaan Website &amp; Sertifikat SSL (Total: {len(sorted_ws)} | Online: {online_cnt} | Kendala: {issue_cnt})",
+            h2_style,
+        ))
         ws_rows = [[
             Paragraph("<b>Domain</b>", cell_bold),
-            Paragraph("<b>Status Akses</b>", cell_bold),
-            Paragraph("<b>Waktu Respon</b>", cell_bold),
+            Paragraph("<b>Status</b>", cell_bold),
+            Paragraph("<b>Respon</b>", cell_bold),
             Paragraph("<b>Masa Aktif SSL</b>", cell_bold),
         ]]
-        for w in websites:
+        for w in sorted_ws:
             resp_val = w.get("response_ms") or w.get("response_time_ms")
             resp_str = f"{resp_val:.0f}ms" if resp_val is not None else "-"
+            raw_code = w.get("status_code")
+            code_str = str(raw_code).strip() if raw_code not in (None, "", "-") else "DNS/TIMEOUT"
+            online = is_website_online(w)
+            st_col = "#047857" if online else "#b91c1c"
+            st_txt = "ONLINE" if online else "KENDALA"
             ssl_val = w.get("ssl_days")
             if ssl_val is None:
                 ssl_str = "N/A"
             elif ssl_val <= 0:
-                ssl_str = f"KADALUARSA ({ssl_val:.0f}h)"
+                ssl_str = f"<font color='#b91c1c'><b>KADALUARSA ({ssl_val:.0f}h)</b></font>"
+            elif ssl_val <= 14:
+                ssl_str = f"<font color='#b45309'><b>{ssl_val:.0f} hari</b></font>"
             else:
                 ssl_str = f"{ssl_val:.0f} hari"
             ws_rows.append([
                 Paragraph(_esc(w.get("domain", "")), cell_style),
-                Paragraph(_esc(w.get("status_code", "-")), cell_style),
+                Paragraph(f"{_esc(code_str)} (<font color='{st_col}'><b>{st_txt}</b></font>)", cell_style),
                 Paragraph(resp_str, cell_style),
                 Paragraph(ssl_str, cell_style),
             ])
-        ws_table = Table(ws_rows, colWidths=[200, 110, 110, 120])
+        ws_table = Table(ws_rows, colWidths=[195, 135, 85, 125])
         ws_table.setStyle(
             TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),

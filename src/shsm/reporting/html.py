@@ -5,6 +5,8 @@ from __future__ import annotations
 import html
 from typing import Any, Dict
 
+from shsm.reporting.common import is_website_online, sort_websites_for_report
+
 
 def render_html_report(data: Dict[str, Any]) -> str:
     """Render a clean, high-contrast, executive & layperson-friendly HTML report."""
@@ -552,12 +554,16 @@ def render_html_report(data: Dict[str, Any]) -> str:
 
     # Websites Availability and SSL
     if websites:
-        out.append("<div class='section-title'>Ketersediaan Website & Sertifikat SSL</div>")
-        out.append("<div class='section-desc'>Pemeriksaan apakah website dapat diakses dari publik dan sisa masa aktif keamanan SSL/HTTPS.</div>")
+        sorted_ws = sort_websites_for_report(websites)
+        online_cnt = sum(1 for w in sorted_ws if is_website_online(w))
+        issue_cnt = len(sorted_ws) - online_cnt
+        out.append(f"<div class='section-title'>Ketersediaan Website & Sertifikat SSL (Total: {len(sorted_ws)} | Online: {online_cnt} | Kendala: {issue_cnt})</div>")
+        out.append("<div class='section-desc'>Pemeriksaan apakah website dapat diakses dari publik dan sisa masa aktif keamanan SSL/HTTPS (situs bermasalah ditampilkan paling atas).</div>")
         out.append("<table><thead><tr><th>Domain Website</th><th>Status Akses</th><th>Waktu Respon</th><th>Sisa Waktu SSL</th><th>Status</th></tr></thead><tbody>")
-        for w in websites:
+        for w in sorted_ws:
             dom = html.escape(str(w.get("domain", "")))
-            code = str(w.get("status_code", "-"))
+            raw_code = w.get("status_code")
+            code = str(raw_code).strip() if raw_code not in (None, "", "-") else "DNS/TIMEOUT"
             resp_val = w.get("response_ms") or w.get("response_time_ms")
             resp_ms = f"{resp_val:.0f} ms" if resp_val is not None else "-"
             ssl_days = w.get("ssl_days")
@@ -579,19 +585,7 @@ def render_html_report(data: Dict[str, Any]) -> str:
                 ssl_text = "N/A"
                 ssl_badge = "<span class='badge badge-low'>TIDAK TERDETEKSI</span>"
 
-            # Check HTTP status accurately (respect explicit ok flag & numeric uptime %)
-            explicit_ok = w.get("ok")
-            if explicit_ok is not None:
-                is_online = bool(explicit_ok)
-            elif "uptime" in str(code).lower():
-                try:
-                    is_online = float(str(code).split("%")[0].strip()) >= 95.0
-                except ValueError:
-                    is_online = False
-            else:
-                is_online = str(code).strip() in ("200", "201", "204", "301", "302", "307", "308")
-
-            if is_online:
+            if is_website_online(w):
                 st_badge = "<span class='badge badge-pass'>ONLINE</span>"
             else:
                 st_badge = "<span class='badge badge-crit'>KENDALA</span>"

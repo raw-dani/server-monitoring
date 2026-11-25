@@ -35,7 +35,7 @@ class InventoryRepo:
 
     def latest_services(self) -> List[Dict[str, Any]]:
         rows = self.db.query(
-            "SELECT s.* FROM service_checks s JOIN (SELECT unit, MAX(id) AS mid FROM service_checks GROUP BY unit) m "
+            "SELECT s.* FROM service_checks s JOIN (SELECT role, MAX(id) AS mid FROM service_checks GROUP BY role) m "
             "ON s.id = m.mid ORDER BY s.role, s.unit")
         return [dict(r) for r in rows]
 

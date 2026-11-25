@@ -168,7 +168,9 @@ def test_pdf_escapes_xml_and_html_renders_metrics_and_website_states(temp_dir):
             }
         ],
         "websites": [
+            {"domain": "healthy.example.com", "status_code": 200, "ok": True, "response_ms": 40, "ssl_days": 60},
             {"domain": "down.example.com", "status_code": "0.0% uptime", "response_ms": 0, "ssl_days": -2},
+            {"domain": "timeout.example.com", "status_code": None, "ok": False, "response_ms": 30000, "ssl_days": 30},
             {"domain": "protected.example.com", "status_code": 403, "ok": True, "response_ms": 45, "ssl_days": 60},
         ],
     }
@@ -178,8 +180,12 @@ def test_pdf_escapes_xml_and_html_renders_metrics_and_website_states(temp_dir):
     assert "Prioritas Tindakan" in html_out
     assert "Aktivitas Pertahanan Aktif" in html_out
     assert "KADALUARSA" in html_out
+    assert "DNS/TIMEOUT" in html_out
+    assert "Total: 4 | Online: 2 | Kendala: 2" in html_out
     assert "0.0% uptime (<span class='badge badge-crit'>KENDALA</span>)" in html_out
     assert "403 (<span class='badge badge-pass'>ONLINE</span>)" in html_out
+    # Problem domains sorted before healthy domains
+    assert html_out.index("down.example.com") < html_out.index("healthy.example.com")
 
     out_pdf = os.path.join(temp_dir, "escaped_report.pdf")
     pdf_path = generate_pdf_report(report_data, out_pdf)

@@ -154,7 +154,7 @@ DEFAULTS: Dict[str, Any] = {
             "redis": {"patterns": ["redis-server", "redis"], "units": [], "required": False},
             "ssh": {"patterns": ["ssh", "sshd"], "units": [], "required": True},
             "fail2ban": {"patterns": ["fail2ban"], "units": [], "required": False},
-            "firewall": {"patterns": ["ufw", "firewalld", "csf", "lfd", "nftables", "netfilter-persistent"],
+            "firewall": {"patterns": ["csf", "lfd", "ufw", "firewalld", "nftables", "netfilter-persistent"],
                          "units": [], "required": False},
             "cron": {"patterns": ["cron", "crond"], "units": [], "required": True},
         },
