@@ -15,7 +15,7 @@ shsm ALL=(ALL) NOPASSWD: /usr/bin/chkrootkit *
 shsm ALL=(ALL) NOPASSWD: /usr/bin/clamscan *, /usr/bin/clamdscan *
 
 # 4. Firewall inspection & auto-drop (strictly limited to banning abusive IPs)
-shsm ALL=(ALL) NOPASSWD: /usr/sbin/ufw status *, /usr/bin/ufw status *
+shsm ALL=(ALL) NOPASSWD: /usr/sbin/ufw status *, /usr/bin/ufw status *, /usr/sbin/ufw insert *, /usr/bin/ufw insert *, /usr/sbin/ufw delete *, /usr/bin/ufw delete *
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/csf -l, /usr/bin/csf -l, /usr/sbin/csf -d *, /usr/bin/csf -d *, /usr/sbin/csf -td *, /usr/bin/csf -td *, /usr/sbin/csf -dr *, /usr/bin/csf -dr *, /usr/sbin/csf -tr *, /usr/bin/csf -tr *
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/ipset *, /sbin/ipset *, /usr/bin/ipset *
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/nft list ruleset, /usr/bin/nft list ruleset
@@ -27,7 +27,7 @@ shsm ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables -L *, /sbin/ip6tables -L *, /usr/bi
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables -C *, /sbin/ip6tables -C *, /usr/bin/ip6tables -C *
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables -I INPUT *, /sbin/ip6tables -I INPUT *, /usr/bin/ip6tables -I INPUT *
 shsm ALL=(ALL) NOPASSWD: /usr/sbin/ip6tables -D INPUT *, /sbin/ip6tables -D INPUT *, /usr/bin/ip6tables -D INPUT *
-shsm ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd --state, /usr/bin/firewall-cmd --list-all *
+shsm ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd --state, /usr/bin/firewall-cmd --list-all *, /usr/bin/firewall-cmd --list-rich-rules*, /usr/bin/firewall-cmd --add-rich-rule=*, /usr/bin/firewall-cmd --remove-rich-rule=*
 shsm ALL=(ALL) NOPASSWD: /usr/bin/killall -9 lsphp, /bin/killall -9 lsphp, /usr/bin/pkill -9 lsphp
 
 # 5. Fail2ban status & IP ban management

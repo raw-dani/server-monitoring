@@ -54,17 +54,18 @@ fi
 echo "==> [3/4] Configuring iptables Layer-4 per-IP Rate-Limiting rules..."
 
 if command -v iptables > /dev/null 2>&1; then
+    # Insert at top of INPUT so UFW / Firewalld accept chains cannot bypass protections
     # 1. Drop malformed/INVALID packets immediately
     iptables -C INPUT -m conntrack --ctstate INVALID -j DROP 2>/dev/null || \
-    iptables -A INPUT -m conntrack --ctstate INVALID -j DROP
+    iptables -I INPUT 1 -m conntrack --ctstate INVALID -j DROP
 
     # 2. Per-IP SYN Flood protection (only drops IPs exceeding 30 SYN/s burst 60, never global users)
     iptables -C INPUT -p tcp --syn -m hashlimit --hashlimit-above 30/sec --hashlimit-burst 60 --hashlimit-mode srcip --hashlimit-name shsm_syn -j DROP 2>/dev/null || \
-    iptables -A INPUT -p tcp --syn -m hashlimit --hashlimit-above 30/sec --hashlimit-burst 60 --hashlimit-mode srcip --hashlimit-name shsm_syn -j DROP
+    iptables -I INPUT 1 -p tcp --syn -m hashlimit --hashlimit-above 30/sec --hashlimit-burst 60 --hashlimit-mode srcip --hashlimit-name shsm_syn -j DROP
 
     # 3. Limit concurrent connections per IP on HTTP/HTTPS to prevent socket exhaustion
     iptables -C INPUT -p tcp -m multiport --dports 80,443 -m connlimit --connlimit-above 80 -j REJECT --reject-with tcp-reset 2>/dev/null || \
-    iptables -A INPUT -p tcp -m multiport --dports 80,443 -m connlimit --connlimit-above 80 -j REJECT --reject-with tcp-reset
+    iptables -I INPUT 1 -p tcp -m multiport --dports 80,443 -m connlimit --connlimit-above 80 -j REJECT --reject-with tcp-reset
 
     echo "    iptables per-IP rate-limiting rules applied successfully."
     if command -v netfilter-persistent > /dev/null 2>&1; then

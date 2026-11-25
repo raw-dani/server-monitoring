@@ -48,7 +48,12 @@ def calculate_component_score(
                 chk_time = from_iso(m["checked_at"]) if m.get("checked_at") else None
                 max_stale = stale_after(exp_id)
                 if chk_time and (now_dt - chk_time).total_seconds() <= max_stale:
-                    if st in (CheckStatus.PASS.value, CheckStatus.WARNING.value, CheckStatus.CRITICAL.value):
+                    if st in (
+                        CheckStatus.PASS.value,
+                        CheckStatus.WARNING.value,
+                        CheckStatus.CRITICAL.value,
+                        CheckStatus.NOT_APPLICABLE.value,
+                    ):
                         fresh_and_conclusive = True
                         break
             if fresh_and_conclusive:

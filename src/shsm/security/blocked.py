@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
 import socket
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -194,12 +195,81 @@ def get_ipset_blocked(ctx: Context) -> List[Dict[str, Any]]:
     return results
 
 
+def get_ufw_blocked(ctx: Context) -> List[Dict[str, Any]]:
+    """Retrieve DENY rules from UFW if active."""
+    ufw_bin = ctx.runner.which("ufw") or ctx.runner.which("/usr/sbin/ufw")
+    if not ufw_bin:
+        return []
+    res = _run_with_sudo_fallback(ctx, [ufw_bin, "status"], timeout=8)
+    if not res.ok or not res.stdout or "status: active" not in res.stdout.lower():
+        return []
+    results: List[Dict[str, Any]] = []
+    for line in res.stdout.splitlines():
+        if "DENY" not in line:
+            continue
+        parts = line.split()
+        # Format: "Anywhere  DENY  1.2.3.4" or "Anywhere (v6)  DENY  2001:..."
+        for tok in parts:
+            cand = tok.strip()
+            if "/" in cand:
+                try:
+                    ipaddress.ip_network(cand, strict=False)
+                    results.append({
+                        "source": "ufw",
+                        "target": cand,
+                        "jail_or_chain": "ufw",
+                        "packets": "-",
+                        "bytes": "-",
+                        "note": "UFW DENY",
+                    })
+                    break
+                except ValueError:
+                    continue
+            elif is_valid_ip(cand):
+                results.append({
+                    "source": "ufw",
+                    "target": cand,
+                    "jail_or_chain": "ufw",
+                    "packets": "-",
+                    "bytes": "-",
+                    "note": "UFW DENY",
+                })
+                break
+    return results
+
+
+def get_firewalld_blocked(ctx: Context) -> List[Dict[str, Any]]:
+    """Retrieve drop/reject rich rules from Firewalld if running."""
+    fw_bin = ctx.runner.which("firewall-cmd") or ctx.runner.which("/usr/bin/firewall-cmd")
+    if not fw_bin:
+        return []
+    res = _run_with_sudo_fallback(ctx, [fw_bin, "--list-rich-rules"], timeout=8)
+    if not res.ok or not res.stdout:
+        return []
+    results: List[Dict[str, Any]] = []
+    for line in res.stdout.splitlines():
+        if ("drop" in line or "reject" in line) and "source address=" in line:
+            m = re.search(r'source address="([^"]+)"', line)
+            if m:
+                results.append({
+                    "source": "firewalld",
+                    "target": m.group(1),
+                    "jail_or_chain": "firewalld",
+                    "packets": "-",
+                    "bytes": "-",
+                    "note": "Firewalld rich rule",
+                })
+    return results
+
+
 def list_all_blocked(ctx: Context) -> List[Dict[str, Any]]:
-    """Return unified list of all blocked IPs/subnets from Fail2Ban, ipset, and iptables."""
+    """Return unified list of all blocked IPs/subnets from Fail2Ban, ipset, UFW, Firewalld, and iptables."""
     f2b_list = get_fail2ban_blocked(ctx)
     ipt_list = get_iptables_blocked(ctx)
     ipset_list = get_ipset_blocked(ctx)
-    return f2b_list + ipset_list + ipt_list
+    ufw_list = get_ufw_blocked(ctx)
+    fwd_list = get_firewalld_blocked(ctx)
+    return f2b_list + ipset_list + ufw_list + fwd_list + ipt_list
 
 
 def check_ip_blocked(ctx: Context, ip: str) -> Dict[str, Any]:
@@ -279,7 +349,24 @@ def unban_ip_unified(ctx: Context, ip: str, jail: Optional[str] = None) -> Tuple
             any_success = True
             messages.append(f"CSF: Removed {clean_ip} from temp/permanent deny")
 
-    # 4. Check and remove from iptables/ip6tables INPUT DROP rules
+    # 4. Check and remove from UFW / Firewalld if active
+    ufw_bin = ctx.runner.which("ufw") or ctx.runner.which("/usr/sbin/ufw")
+    if ufw_bin:
+        res_ufw = _run_with_sudo_fallback(ctx, [ufw_bin, "delete", "deny", "from", clean_ip], timeout=10)
+        if res_ufw.ok and "deleted" in (res_ufw.stdout or "").lower():
+            any_success = True
+            messages.append(f"UFW: Deleted deny rule for {clean_ip}")
+
+    fw_bin = ctx.runner.which("firewall-cmd") or ctx.runner.which("/usr/bin/firewall-cmd")
+    if fw_bin:
+        fam = "ipv6" if ":" in clean_ip else "ipv4"
+        rich_rule = f'rule family="{fam}" source address="{clean_ip}" drop'
+        res_fw = _run_with_sudo_fallback(ctx, [fw_bin, f"--remove-rich-rule={rich_rule}"], timeout=10)
+        if res_fw.ok and "success" in (res_fw.stdout or "").lower():
+            any_success = True
+            messages.append(f"Firewalld: Removed rich rule for {clean_ip}")
+
+    # 5. Check and remove from iptables/ip6tables INPUT DROP rules
     is_v6_u = ":" in clean_ip
     u_tool = "ip6tables" if is_v6_u else "iptables"
     ipt_bin = ctx.runner.which(u_tool) or ctx.runner.which(f"/sbin/{u_tool}") or ctx.runner.which(f"/usr/sbin/{u_tool}")
@@ -358,6 +445,45 @@ def _ban_via_ipset(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[bool,
     return False, f"ipset add failed: {res_add.stderr or res_add.stdout}"
 
 
+def _ban_via_ufw(ctx: Context, clean_ip: str, reason: str) -> Tuple[bool, str]:
+    """Insert top-priority DENY rule in UFW if UFW is active."""
+    backend = str(ctx.config.get("security.firewall_backend", "auto")).lower()
+    if backend not in ("auto", "ufw"):
+        return False, "ufw backend disabled"
+    ufw_bin = ctx.runner.which("ufw") or ctx.runner.which("/usr/sbin/ufw")
+    if not ufw_bin:
+        return False, "ufw binary not found"
+    st = _run_with_sudo_fallback(ctx, [ufw_bin, "status"], timeout=6)
+    if not st.ok or "status: active" not in (st.stdout or "").lower():
+        return False, "ufw not active"
+    res = _run_with_sudo_fallback(ctx, [ufw_bin, "insert", "1", "deny", "from", clean_ip, "comment", reason[:64]], timeout=10)
+    if res.ok:
+        return True, f"UFW inserted DENY rule for {clean_ip}"
+    return False, f"UFW ban failed: {res.stderr or res.stdout}"
+
+
+def _ban_via_firewalld(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[bool, str]:
+    """Insert temporary rich drop rule in Firewalld if active."""
+    backend = str(ctx.config.get("security.firewall_backend", "auto")).lower()
+    if backend not in ("auto", "firewalld"):
+        return False, "firewalld backend disabled"
+    fw_bin = ctx.runner.which("firewall-cmd") or ctx.runner.which("/usr/bin/firewall-cmd")
+    if not fw_bin:
+        return False, "firewall-cmd binary not found"
+    st = _run_with_sudo_fallback(ctx, [fw_bin, "--state"], timeout=6)
+    if not st.ok or "running" not in (st.stdout or "").lower():
+        return False, "firewalld not running"
+    fam = "ipv6" if ":" in clean_ip else "ipv4"
+    rich_rule = f'rule family="{fam}" source address="{clean_ip}" drop'
+    cmd = [fw_bin, f"--add-rich-rule={rich_rule}"]
+    if ttl_seconds > 0:
+        cmd.append(f"--timeout={ttl_seconds}s")
+    res = _run_with_sudo_fallback(ctx, cmd, timeout=10)
+    if res.ok:
+        return True, f"Firewalld blocked {clean_ip} (TTL: {ttl_seconds}s)"
+    return False, f"Firewalld ban failed: {res.stderr or res.stdout}"
+
+
 def ban_ip_cloudflare(ctx: Context, clean_ip: str, reason: str = "SHSM Auto-Block") -> Tuple[bool, str]:
     """Push IP block rule to Cloudflare WAF Access Rules if enabled and configured."""
     if not bool(ctx.config.get("security.cloudflare_enabled", False)):
@@ -417,7 +543,16 @@ def ban_ip_unified(
         if ipset_ok:
             return True, ipset_msg
 
-        # 3. Direct iptables / ip6tables DROP fallback
+        # 3. Try UFW / Firewalld native drop if active
+        ufw_ok, ufw_msg = _ban_via_ufw(ctx, clean_ip, ban_reason)
+        if ufw_ok:
+            return True, ufw_msg
+
+        fwd_ok, fwd_msg = _ban_via_firewalld(ctx, clean_ip, ttl)
+        if fwd_ok:
+            return True, fwd_msg
+
+        # 4. Direct iptables / ip6tables DROP fallback
         ipt_bin = ctx.runner.which(tool_name) or ctx.runner.which(f"/sbin/{tool_name}") or ctx.runner.which(f"/usr/sbin/{tool_name}")
         if not ipt_bin:
             return False, f"{tool_name} binary not found"
@@ -429,7 +564,7 @@ def ban_ip_unified(
             return True, f"Successfully inserted DROP rule for {clean_ip} in {tool_name}"
         return False, f"Failed to insert {tool_name} DROP rule: {res_i.stderr or res_i.stdout}"
 
-    # Default: Try Fail2Ban first, fallback to CSF/ipset/iptables if Fail2Ban is not available
+    # Default: Try Fail2Ban first, fallback to CSF/ipset/UFW/Firewalld/iptables if Fail2Ban is unavailable
     f_ok, f_msg = fail2ban.ban_ip(ctx, clean_ip, jail=jail)
     if f_ok:
         return True, f_msg
@@ -441,6 +576,14 @@ def ban_ip_unified(
     ipset_ok, ipset_msg = _ban_via_ipset(ctx, clean_ip, ttl)
     if ipset_ok:
         return True, f"{f_msg}. Fallback: {ipset_msg}"
+
+    ufw_ok, ufw_msg = _ban_via_ufw(ctx, clean_ip, ban_reason)
+    if ufw_ok:
+        return True, f"{f_msg}. Fallback: {ufw_msg}"
+
+    fwd_ok, fwd_msg = _ban_via_firewalld(ctx, clean_ip, ttl)
+    if fwd_ok:
+        return True, f"{f_msg}. Fallback: {fwd_msg}"
 
     ipt_bin = ctx.runner.which(tool_name) or ctx.runner.which(f"/sbin/{tool_name}") or ctx.runner.which(f"/usr/sbin/{tool_name}")
     if ipt_bin:

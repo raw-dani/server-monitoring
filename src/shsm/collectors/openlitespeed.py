@@ -396,16 +396,25 @@ def collect(ctx: Context) -> CollectorOutput:
             sample = suspicious[0]
             action_notes = []
 
-            # Automatically ban offending IPs in Fail2Ban if active defense is enabled
+            # Automatically ban offending IPs in Fail2Ban (with firewall fallback) if active defense is enabled
             auto_ban_success = False
             if auto_block:
                 unique_ips = {s.get("ip") for s in suspicious if s.get("ip")}
                 banned_count = 0
                 for s_ip in unique_ips:
+                    if is_protected_ip(ctx, s_ip)[0]:
+                        continue
                     ok, detail = fail2ban.ban_ip(ctx, s_ip, jail=target_jail)
                     if ok:
                         banned_count += 1
                         action_notes.append(f"Auto-banned {s_ip} in Fail2Ban")
+                    else:
+                        ok_fw, msg_fw = blocked.ban_ip_unified(
+                            ctx, s_ip, jail=target_jail, use_iptables=True, reason="Exploit probe"
+                        )
+                        if ok_fw:
+                            banned_count += 1
+                            action_notes.append(f"Auto-banned {s_ip} via firewall ({msg_fw})")
                 if banned_count > 0:
                     auto_ban_success = True
 

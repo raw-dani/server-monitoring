@@ -14,7 +14,14 @@ from shsm.collectors.openlitespeed import (
 )
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus
-from shsm.security.blocked import ban_ip_unified, is_protected_ip, unban_ip_unified
+from shsm.reporting.scoring import calculate_component_score
+from shsm.security.blocked import (
+    ban_ip_unified,
+    get_firewalld_blocked,
+    get_ufw_blocked,
+    is_protected_ip,
+    unban_ip_unified,
+)
 from shsm.security.ols_anti_ddos import parse_ols_tuning_and_ddos
 from shsm.security.ols_anti_ddos import scan as scan_ols_ddos
 from shsm.security.watch import WatchState, run_watch_tick
@@ -229,3 +236,63 @@ def test_cli_watch_once_dry_run():
         res = runner.invoke(main, ["watch", "--once", "--dry-run"])
         assert res.exit_code == 0
         assert "Watch tick done" in res.output
+
+
+def test_ufw_and_firewalld_ban_list_unban(test_db, sample_config):
+    # UFW backend
+    ctx_ufw = Context(sample_config, test_db)
+    ctx_ufw.runner = MagicMock()
+    ctx_ufw.runner.which.side_effect = lambda name: "/usr/sbin/ufw" if "ufw" in name else None
+
+    def ufw_run(cmd, timeout=None):
+        if "status" in cmd:
+            return MagicMock(ok=True, stdout="Status: active\nAnywhere DENY 185.218.86.7\n", stderr="")
+        if "delete" in cmd:
+            return MagicMock(ok=True, stdout="Rule deleted\n", stderr="")
+        return MagicMock(ok=True, stdout="Rule inserted\n", stderr="")
+
+    ctx_ufw.runner.run.side_effect = ufw_run
+    ok_b, msg_b = ban_ip_unified(ctx_ufw, "185.218.86.7", use_iptables=True, reason="Test UFW")
+    assert ok_b is True
+    assert "UFW" in msg_b
+    ufw_list = get_ufw_blocked(ctx_ufw)
+    assert len(ufw_list) == 1 and ufw_list[0]["target"] == "185.218.86.7"
+    ok_u, msgs_u = unban_ip_unified(ctx_ufw, "185.218.86.7")
+    assert ok_u is True and any("UFW:" in m for m in msgs_u)
+
+    # Firewalld backend
+    ctx_fwd = Context(sample_config, test_db)
+    ctx_fwd.runner = MagicMock()
+    ctx_fwd.runner.which.side_effect = lambda name: "/usr/bin/firewall-cmd" if "firewall-cmd" in name else None
+
+    def fwd_run(cmd, timeout=None):
+        if "--state" in cmd:
+            return MagicMock(ok=True, stdout="running\n", stderr="")
+        if "--list-rich-rules" in cmd:
+            return MagicMock(ok=True, stdout='rule family="ipv4" source address="185.218.86.7" drop\n', stderr="")
+        return MagicMock(ok=True, stdout="success\n", stderr="")
+
+    ctx_fwd.runner.run.side_effect = fwd_run
+    ok_f, msg_f = ban_ip_unified(ctx_fwd, "185.218.86.7", use_iptables=True, ttl_seconds=600)
+    assert ok_f is True and "Firewalld" in msg_f
+    fwd_list = get_firewalld_blocked(ctx_fwd)
+    assert len(fwd_list) == 1 and fwd_list[0]["target"] == "185.218.86.7"
+    ok_fu, msgs_fu = unban_ip_unified(ctx_fwd, "185.218.86.7")
+    assert ok_fu is True and any("Firewalld:" in m for m in msgs_fu)
+
+
+def test_scoring_not_applicable_optional_fail2ban_keeps_full_coverage():
+    from datetime import datetime, timezone
+
+    from shsm.core.timeutils import to_iso
+    now = datetime.now(timezone.utc)
+    iso_now = to_iso(now)
+    checks = [
+        {"check_id": "firewall.status", "status": CheckStatus.PASS.value, "checked_at": iso_now},
+        {"check_id": "firewall.ports", "status": CheckStatus.PASS.value, "checked_at": iso_now},
+        {"check_id": "fail2ban.status", "status": CheckStatus.NOT_APPLICABLE.value, "checked_at": iso_now},
+        {"check_id": "network.outbound", "status": CheckStatus.PASS.value, "checked_at": iso_now},
+    ]
+    score, cov, _details = calculate_component_score("firewall_network", checks, [], now)
+    assert score == 100.0
+    assert cov == 100.0
