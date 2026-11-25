@@ -9,9 +9,12 @@ import time
 from typing import Any, Dict, List, Tuple
 
 import requests
+import urllib3
 
 from shsm.core.context import Context
 from shsm.core.findings import CheckStatus, CollectorOutput, Confidence, Severity
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 SOURCE = "http_client"
 CATEGORY = "websites"
@@ -49,7 +52,7 @@ def _check_http(
     last_err_type = "unknown"
     last_err_msg = ""
 
-    for attempt in range(retries + 1):
+    for _attempt in range(retries + 1):
         try:
             with requests.Session() as session:
                 session.max_redirects = max_redirects
@@ -75,7 +78,7 @@ def _check_http(
                 "error_type": None if is_ok else "http_status",
                 "error": None if is_ok else f"Unexpected status code {code} (expected {expected_statuses})",
             }
-        except requests.exceptions.Timeout as exc:
+        except requests.exceptions.Timeout:
             last_err_type = "timeout"
             last_err_msg = f"Connection timed out after {timeout}s"
             continue
