@@ -41,12 +41,33 @@ _IPSET_V4 = "shsm_blacklist"
 _IPSET_V6 = "shsm_blacklist_v6"
 
 
+def _read_csf_whitelist_entries(paths: Tuple[str, ...] = ("/etc/csf/csf.allow", "/etc/csf/csf.ignore")) -> Set[str]:
+    """Read IP/CIDR entries from CSF allow/ignore files when readable."""
+    entries: Set[str] = set()
+    for p in paths:
+        try:
+            with open(p, encoding="utf-8", errors="replace") as fh:
+                for raw in fh:
+                    line = raw.split("#", 1)[0].strip()
+                    if not line:
+                        continue
+                    # Ignore advanced CSF filter syntax like 'tcp|in|d=22|s=1.2.3.4' unless simple IP/CIDR
+                    token = line.split()[0]
+                    if "|" not in token:
+                        entries.add(token)
+        except OSError:
+            continue
+    return entries
+
+
 def get_protected_whitelist(ctx: Context) -> Set[str]:
-    """Build full set of protected local/configured whitelist IPs."""
+    """Build full set of protected local, configured, and CSF-whitelisted IPs/CIDRs."""
     whitelist = set(str(x).strip() for x in ctx.config.get("security.ip_whitelist", ["127.0.0.1", "::1"]))
     cfg_ip = ctx.config.get("security.server_public_ip")
     if cfg_ip:
         whitelist.add(str(cfg_ip).strip())
+    if type(ctx.runner) is Runner:
+        whitelist.update(_read_csf_whitelist_entries())
     try:
         hostname = socket.gethostname()
         for host_ip in socket.gethostbyname_ex(hostname)[2]:
@@ -57,7 +78,7 @@ def get_protected_whitelist(ctx: Context) -> Set[str]:
 
 
 def is_protected_ip(ctx: Context, ip: str, whitelist: Optional[Set[str]] = None) -> Tuple[bool, str]:
-    """Return (True, reason) if IP must never be locally banned (loopback, whitelist, RFC1918, Cloudflare)."""
+    """Return (True, reason) if IP must never be locally banned (loopback, whitelist/CIDR, RFC1918, Cloudflare)."""
     clean_ip = ip.strip()
     wl = whitelist if whitelist is not None else get_protected_whitelist(ctx)
     if clean_ip in wl or clean_ip.startswith("127."):
@@ -69,6 +90,15 @@ def is_protected_ip(ctx: Context, ip: str, whitelist: Optional[Set[str]] = None)
         return False, ""
 
     if isinstance(target, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+        # Check CIDR subnets stored in security.ip_whitelist or csf.allow (e.g. 182.253.122.0/24)
+        for entry in wl:
+            if "/" in entry:
+                try:
+                    wl_net = ipaddress.ip_network(entry, strict=False)
+                    if target.version == wl_net.version and target in wl_net:
+                        return True, f"in whitelisted subnet {entry}"
+                except ValueError:
+                    continue
         if target.is_loopback:
             return True, "loopback address"
         for priv_net in _RFC1918_NETWORKS:
@@ -413,6 +443,19 @@ def _ban_via_csf(ctx: Context, clean_ip: str, ttl_seconds: int, reason: str) -> 
     return False, f"CSF ban failed: {res.stderr or res.stdout}"
 
 
+def _ipset_insert_position(ctx: Context, ipt_bin: str) -> str:
+    """Return iptables INPUT insert index: right after CSF ALLOWIN if present, else '1'."""
+    if type(ctx.runner) is not Runner:
+        return "1"
+    res = _run_with_sudo_fallback(ctx, [ipt_bin, "-L", "INPUT", "--line-numbers", "-n"], timeout=6)
+    if res.ok and res.stdout:
+        for line in res.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1] == "ALLOWIN":
+                return str(int(parts[0]) + 1)
+    return "1"
+
+
 def _ban_via_ipset(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[bool, str]:
     """Insert IP into O(1) kernel ipset hash table and ensure iptables match rule exists."""
     if not bool(ctx.config.get("security.ipset_enabled", True)) or "/" in clean_ip:
@@ -441,7 +484,8 @@ def _ban_via_ipset(ctx: Context, clean_ip: str, ttl_seconds: int) -> Tuple[bool,
 
         chk_cmd = [ipt_bin, "-C", "INPUT", "-m", "set", "--match-set", set_name, "src", "-j", "DROP"]
         if not _run_with_sudo_fallback(ctx, chk_cmd, timeout=6).ok:
-            ins_cmd = [ipt_bin, "-I", "INPUT", "1", "-m", "set", "--match-set", set_name, "src", "-j", "DROP"]
+            pos = _ipset_insert_position(ctx, ipt_bin)
+            ins_cmd = [ipt_bin, "-I", "INPUT", pos, "-m", "set", "--match-set", set_name, "src", "-j", "DROP"]
             res_ins = _run_with_sudo_fallback(ctx, ins_cmd, timeout=6)
             if not res_ins.ok:
                 return False, f"iptables ipset hook failed: {res_ins.stderr or res_ins.stdout}"

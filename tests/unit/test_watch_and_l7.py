@@ -98,6 +98,14 @@ def test_cloudflare_ip_protection(test_db, sample_config):
     assert "protected" in msg.lower()
 
 
+def test_cidr_whitelist_protection(test_db, sample_config):
+    sample_config.data["security"]["ip_whitelist"] = ["127.0.0.1", "182.253.122.0/24"]
+    ctx = Context(sample_config, test_db)
+    prot, reason = is_protected_ip(ctx, "182.253.122.2")
+    assert prot is True
+    assert "182.253.122.0/24" in reason
+
+
 def test_ban_prefers_csf_then_ipset(test_db, sample_config):
     ctx = Context(sample_config, test_db)
     ctx.runner = MagicMock()
