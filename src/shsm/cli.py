@@ -1101,15 +1101,17 @@ def cmd_blocked(click_ctx: click.Context, ip: str, check: bool) -> None:
                 matched_sub = f" (via subnet {m['matched_subnet']})" if "matched_subnet" in m else ""
                 click.echo(f"  * Source: {m['source'].upper()} | Chain/Jail: {m['jail_or_chain']} | Target: {m['target']}{matched_sub} | Note: {m['note']}")
         else:
-            click.secho(f"[ALLOWED] IP '{target_ip}' is NOT blocked in Fail2Ban or iptables.", fg="green", bold=True)
+            click.secho(f"[ALLOWED] IP '{target_ip}' is NOT blocked in Fail2Ban, CSF, ipset, UFW, Firewalld, or iptables.", fg="green", bold=True)
         return
 
     # List all blocked IPs and subnets
     items = blocked.list_all_blocked(app_ctx)
-    f2b_count = sum(1 for x in items if x["source"] == "fail2ban")
-    ipt_count = sum(1 for x in items if x["source"] == "iptables")
+    counts_by_src: Dict[str, int] = {}
+    for x in items:
+        counts_by_src[x["source"]] = counts_by_src.get(x["source"], 0) + 1
+    breakdown = ", ".join(f"{cnt} {src}" for src, cnt in counts_by_src.items()) or "0"
 
-    click.secho(f"=== Centralized Blocked IPs & Rules ({len(items)} Total: {f2b_count} Fail2Ban, {ipt_count} iptables) ===", bold=True)
+    click.secho(f"=== Centralized Blocked IPs & Rules ({len(items)} Total: {breakdown}) ===", bold=True)
     if not items:
         click.secho("No blocked IPs or drop rules found.", fg="green")
         return
@@ -1157,7 +1159,7 @@ def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
 
     ok, messages = blocked.unban_ip_unified(app_ctx, ip, jail=jail)
     for m in messages:
-        if "Deleted" in m or "unbanned" in m or "Success" in m:
+        if "Deleted" in m or "Removed" in m or "unbanned" in m or "Success" in m:
             click.secho(f"[SUCCESS] {m}", fg="green")
         elif "No direct DROP" in m or "not installed" in m:
             click.echo(f"[INFO] {m}")

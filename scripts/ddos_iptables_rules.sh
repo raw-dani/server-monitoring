@@ -37,12 +37,12 @@ sysctl -p /etc/sysctl.d/99-shsm-ddos.conf > /dev/null 2>&1 || true
 
 echo "==> [2/4] Initializing O(1) ipset blacklist (if ipset is available)..."
 
-# Determine safe insertion index in INPUT chain: if CSF ALLOWIN exists, insert AFTER it
-# so csf.allow whitelisted IPs are NEVER blocked by ipset/hashlimit/connlimit.
+# Determine safe insertion index in INPUT chain: if CSF LOCALINPUT/ALLOWIN exists,
+# insert AFTER it so csf.allow whitelisted IPs are NEVER blocked by ipset/hashlimit/connlimit.
 _insert_pos_after_allowin() {
     local tool="$1"
     local allow_line
-    allow_line=$("$tool" -L INPUT --line-numbers -n 2>/dev/null | awk '$2 == "ALLOWIN" {print $1; exit}')
+    allow_line=$("$tool" -L INPUT --line-numbers -n 2>/dev/null | awk '$2 == "LOCALINPUT" || $2 == "ALLOWIN" {print $1; exit}')
     if [ -n "$allow_line" ]; then
         echo $((allow_line + 1))
     else

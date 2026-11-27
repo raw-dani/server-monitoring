@@ -296,14 +296,91 @@ def get_firewalld_blocked(ctx: Context) -> List[Dict[str, Any]]:
     return results
 
 
+def get_csf_blocked(ctx: Context) -> List[Dict[str, Any]]:
+    """Retrieve permanently/temporarily blocked IPs & CIDRs from CSF (DENYIN/LOCALINPUT & deny files)."""
+    csf_bin = find_firewall_binary(ctx, "csf", ("/usr/sbin/csf", "/usr/local/sbin/csf", "/sbin/csf"))
+    if not csf_bin:
+        return []
+
+    results: List[Dict[str, Any]] = []
+    seen: Set[Tuple[str, str]] = set()
+
+    # 1. Inspect CSF iptables/ip6tables chains (DENYIN = permanent, LOCALINPUT = tempban)
+    # Works for user 'shsm' via sudoers ('iptables -L *' / 'ip6tables -L *') without invoking slow Perl 'csf -l'.
+    for tool_name in ("iptables", "ip6tables"):
+        ipt_bin = find_firewall_binary(ctx, tool_name, (f"/sbin/{tool_name}", f"/usr/sbin/{tool_name}", f"/usr/bin/{tool_name}"))
+        if not ipt_bin:
+            continue
+        for chain in ("DENYIN", "LOCALINPUT"):
+            res = _run_with_sudo_fallback(ctx, [ipt_bin, "-L", chain, "-n", "-v"], timeout=8)
+            if not res.ok or not res.stdout:
+                continue
+            lines = res.stdout.splitlines()
+            if not any(ln.strip().startswith(f"Chain {chain}") for ln in lines[:3]):
+                continue
+            for line in lines:
+                s = line.strip()
+                if not s or s.startswith("Chain") or s.startswith("pkts"):
+                    continue
+                parts = s.split()
+                if len(parts) >= 8 and parts[2] == "DROP":
+                    source_ip = parts[7]
+                    if source_ip in ("0.0.0.0/0", "::/0"):
+                        continue
+                    key = (source_ip, chain)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    results.append({
+                        "source": "csf",
+                        "target": source_ip,
+                        "jail_or_chain": chain,
+                        "packets": parts[0],
+                        "bytes": parts[1],
+                        "note": "CSF perm deny" if chain == "DENYIN" else "CSF temp deny",
+                    })
+
+    # 2. Fallback/supplement from CSF deny files when readable (e.g. when running as root)
+    if type(ctx.runner) is Runner:
+        existing_targets = {x["target"] for x in results}
+        for path, chain_label, note in (
+            ("/etc/csf/csf.deny", "csf.deny", "CSF perm deny"),
+            ("/var/lib/csf/csf.tempban", "csf.tempban", "CSF temp deny"),
+        ):
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    for raw in fh:
+                        line = raw.split("#", 1)[0].strip()
+                        if not line or line.lower().startswith("include "):
+                            continue
+                        token = line.split("|", 1)[0].split()[0].strip()
+                        if not token or token in existing_targets:
+                            continue
+                        if is_valid_ip(token) or "/" in token:
+                            existing_targets.add(token)
+                            results.append({
+                                "source": "csf",
+                                "target": token,
+                                "jail_or_chain": chain_label,
+                                "packets": "-",
+                                "bytes": "-",
+                                "note": note,
+                            })
+            except OSError:
+                continue
+
+    return results
+
+
 def list_all_blocked(ctx: Context) -> List[Dict[str, Any]]:
-    """Return unified list of all blocked IPs/subnets from Fail2Ban, ipset, UFW, Firewalld, and iptables."""
+    """Return unified list of all blocked IPs/subnets from Fail2Ban, CSF, ipset, UFW, Firewalld, and iptables."""
     f2b_list = get_fail2ban_blocked(ctx)
+    csf_list = get_csf_blocked(ctx)
     ipt_list = get_iptables_blocked(ctx)
     ipset_list = get_ipset_blocked(ctx)
     ufw_list = get_ufw_blocked(ctx)
     fwd_list = get_firewalld_blocked(ctx)
-    return f2b_list + ipset_list + ufw_list + fwd_list + ipt_list
+    return f2b_list + csf_list + ipset_list + ufw_list + fwd_list + ipt_list
 
 
 def check_ip_blocked(ctx: Context, ip: str) -> Dict[str, Any]:
@@ -444,14 +521,14 @@ def _ban_via_csf(ctx: Context, clean_ip: str, ttl_seconds: int, reason: str) -> 
 
 
 def _ipset_insert_position(ctx: Context, ipt_bin: str) -> str:
-    """Return iptables INPUT insert index: right after CSF ALLOWIN if present, else '1'."""
+    """Return iptables INPUT insert index: right after CSF LOCALINPUT/ALLOWIN if present, else '1'."""
     if type(ctx.runner) is not Runner:
         return "1"
     res = _run_with_sudo_fallback(ctx, [ipt_bin, "-L", "INPUT", "--line-numbers", "-n"], timeout=6)
     if res.ok and res.stdout:
         for line in res.stdout.splitlines():
             parts = line.split()
-            if len(parts) >= 2 and parts[0].isdigit() and parts[1] == "ALLOWIN":
+            if len(parts) >= 2 and parts[0].isdigit() and parts[1] in ("LOCALINPUT", "ALLOWIN"):
                 return str(int(parts[0]) + 1)
     return "1"
 

@@ -1,12 +1,54 @@
 from unittest.mock import MagicMock
+
 from shsm.security.blocked import (
+    check_ip_blocked,
+    get_csf_blocked,
     get_fail2ban_blocked,
     get_iptables_blocked,
     list_all_blocked,
-    check_ip_blocked,
     unban_ip_unified,
-    ban_ip_unified,
 )
+
+
+def test_get_csf_blocked():
+    ctx = MagicMock()
+    ctx.runner.which.side_effect = lambda name: f"/usr/sbin/{name}" if name in ("csf", "iptables") else None
+
+    def run_side_effect(cmd, timeout=None):
+        res = MagicMock()
+        if "DENYIN" in cmd:
+            res.ok = True
+            res.stdout = """Chain DENYIN (1 references)
+ pkts bytes target     prot opt in     out     source               destination
+   12   720 DROP       all  --  !lo    *       198.51.100.44        0.0.0.0/0
+"""
+            return res
+        if "LOCALINPUT" in cmd:
+            res.ok = True
+            res.stdout = """Chain LOCALINPUT (1 references)
+ pkts bytes target     prot opt in     out     source               destination
+    0     0 ALLOWIN    all  --  !lo    *       0.0.0.0/0            0.0.0.0/0
+    5   300 DROP       all  --  !lo    *       203.0.113.88         0.0.0.0/0
+    0     0 DENYIN     all  --  !lo    *       0.0.0.0/0            0.0.0.0/0
+"""
+            return res
+        return MagicMock(ok=False, stdout="", stderr="")
+
+    ctx.runner.run.side_effect = run_side_effect
+    items = get_csf_blocked(ctx)
+    assert len(items) == 2
+    assert items[0]["source"] == "csf"
+    assert items[0]["target"] == "198.51.100.44"
+    assert items[0]["jail_or_chain"] == "DENYIN"
+    assert items[1]["target"] == "203.0.113.88"
+    assert items[1]["jail_or_chain"] == "LOCALINPUT"
+
+    all_items = list_all_blocked(ctx)
+    assert any(x["source"] == "csf" and x["target"] == "198.51.100.44" for x in all_items)
+
+    res_chk = check_ip_blocked(ctx, "198.51.100.44")
+    assert res_chk["is_blocked"] is True
+    assert res_chk["matches"][0]["source"] == "csf"
 
 
 def test_get_fail2ban_blocked():
