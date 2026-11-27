@@ -150,10 +150,13 @@ Aggressive web vulnerability scanners and botnets repeatedly probe random paths,
 SHSM provides a built-in automated scanner blocker that reads access logs, computes per-IP error counts, skips whitelist/internal IPs, and drops offending IPs at the Linux kernel packet filter layer (`iptables DROP`).
 
 ```bash
-# 1. Preview / Dry-Run (Check which IPs exceed threshold without banning)
+# 1. Preview / Dry-Run (Menampilkan status [SKIPPED] Already blocked vs [DRY-RUN] Would be blocked)
 sudo -u shsm shsm block-scanners --threshold 10 --dry-run
 
-# 2. Execute Instant Ban (Drops all IPs exceeding threshold directly in iptables)
+# 2. Preview khusus IP yang BELUM diblokir saja
+sudo -u shsm shsm block-scanners --threshold 10 --dry-run --unblocked-only
+
+# 3. Execute Instant Ban (Drops all unblocked IPs exceeding threshold directly in firewall/ipset/iptables)
 sudo -u shsm shsm block-scanners --threshold 10
 ```
 

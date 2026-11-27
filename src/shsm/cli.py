@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import click
 import yaml
@@ -78,7 +78,8 @@ def cmd_commands(click_ctx: click.Context) -> None:
             ("shsm ban <IP> --iptables", "Drop offending IP directly at kernel firewall layer (0% CPU OLS/PHP)."),
             ("shsm unban <IP>", "Unban an IP address centrally from BOTH Fail2Ban and iptables."),
             ("shsm block-scanners", "Scan active access logs, aggregate 404/L7 floods, and auto-drop IPs."),
-            ("shsm block-scanners --dry-run", "Preview scanner/flood IPs exceeding threshold without blocking."),
+            ("shsm block-scanners --dry-run", "Preview scanner/flood IPs (distinguishing already blocked vs new)."),
+            ("shsm block-scanners --dry-run --unblocked-only", "Preview only scanner/flood IPs not yet blocked."),
             ("shsm watch", "Run real-time lightweight adaptive DDoS & L7 flood protection daemon."),
         ]),
         ("3. FINDINGS & ISSUE MANAGEMENT", [
@@ -1170,12 +1171,47 @@ def cmd_unban(click_ctx: click.Context, ip: str, jail: str) -> None:
         click.secho(f"[WARNING] No active bans found or unban could not be confirmed for {ip}.", fg="yellow")
 
 
+def _blocked_targets_matcher(blocked_items: List[Dict[str, Any]]) -> Tuple[Set[str], List[Any]]:
+    """Build exact-target set and parsed CIDR networks from list_all_blocked() entries."""
+    import ipaddress
+
+    exact: Set[str] = set()
+    nets: List[Any] = []
+    for item in blocked_items:
+        tgt = str(item.get("target", "")).strip()
+        if not tgt:
+            continue
+        exact.add(tgt)
+        if "/" in tgt and " " not in tgt:
+            try:
+                nets.append(ipaddress.ip_network(tgt, strict=False))
+            except ValueError:
+                pass
+    return exact, nets
+
+
+def _is_ip_already_blocked(ip: str, exact: Set[str], nets: List[Any]) -> bool:
+    """Check whether IP matches an existing exact ban or CIDR subnet ban."""
+    if ip in exact:
+        return True
+    if nets:
+        import ipaddress
+
+        try:
+            ip_obj = ipaddress.ip_address(ip)
+            return any(ip_obj.version == net.version and ip_obj in net for net in nets)
+        except ValueError:
+            return False
+    return False
+
+
 @main.command("block-scanners")
 @click.option("--threshold", default=30, type=int, help="Minimum 404 count to trigger ban (default: 30)")
 @click.option("--log-file", default=None, help="Path to access.log (default: global + active CyberPanel vhost logs)")
 @click.option("--include-l7", is_flag=True, help="Also detect and ban L7 bursts, POST/wp-json floods, and bad bots")
 @click.option("--limit", default=50, type=int, help="Max new IPs to ban per run to prevent CPU saturation (default: 50)")
 @click.option("--dry-run", is_flag=True, help="Only show IPs that would be banned without executing ban")
+@click.option("--unblocked-only", is_flag=True, help="Hide IPs already blocked by active firewalls/ipset/Fail2Ban")
 @click.pass_context
 def cmd_block_scanners(
     click_ctx: click.Context,
@@ -1184,6 +1220,7 @@ def cmd_block_scanners(
     include_l7: bool,
     limit: int,
     dry_run: bool,
+    unblocked_only: bool,
 ) -> None:
     """Scan web server access log(s), aggregate 404/L7 flood counts per IP, and ban abusive IPs."""
     app_ctx = get_context(click_ctx.obj.get("config_path"), require_db=False)
@@ -1266,19 +1303,25 @@ def cmd_block_scanners(
             click.secho("No external scanner IPs exceeded the threshold.", fg="green")
             return
 
-        already_blocked = set() if dry_run else {x["target"] for x in blocked.list_all_blocked(app_ctx)}
+        exact_blocked, net_blocked = _blocked_targets_matcher(blocked.list_all_blocked(app_ctx))
 
         click.echo(f"\n{'IP Address':<20} {'Hits':<10} {'Action / Status'}")
         click.echo("-" * 70)
 
         banned_count = 0
         processed_count = 0
+        unblocked_count = 0
+        skipped_count = 0
         for ip, (cnt, reason) in sorted_targets:
+            if _is_ip_already_blocked(ip, exact_blocked, net_blocked):
+                skipped_count += 1
+                if not unblocked_only:
+                    click.echo(f"{ip:<20} {cnt:<10} [SKIPPED] Already blocked")
+                continue
+
+            unblocked_count += 1
             if dry_run:
                 click.echo(f"{ip:<20} {cnt:<10} [DRY-RUN] Would be blocked ({reason})")
-                continue
-            if ip in already_blocked:
-                click.echo(f"{ip:<20} {cnt:<10} [SKIPPED] Already blocked")
                 continue
             if processed_count >= max(1, limit):
                 break
@@ -1290,10 +1333,16 @@ def cmd_block_scanners(
             else:
                 click.secho(f"{ip:<20} {cnt:<10} [FAILED] {msg}", fg="yellow")
 
+        if unblocked_only and unblocked_count == 0:
+            click.secho(f"(All {skipped_count} matching IP(s) are already blocked.)", fg="green")
+
         if dry_run:
-            click.secho(f"\nDry-run completed. {len(sorted_targets)} IP(s) match threshold >= {threshold}. To execute bans, run without --dry-run.", fg="cyan")
+            click.secho(
+                f"\nDry-run completed. {unblocked_count} unblocked IP(s) would be blocked ({skipped_count} already blocked) at threshold >= {threshold}. To execute bans, run without --dry-run.",
+                fg="cyan",
+            )
         else:
-            click.secho(f"\nSuccessfully processed {processed_count} IP(s) ({banned_count} newly blocked).", fg="green", bold=True)
+            click.secho(f"\nSuccessfully processed {processed_count} IP(s) ({banned_count} newly blocked, {skipped_count} already blocked).", fg="green", bold=True)
     finally:
         if lock is not None:
             lock.release()

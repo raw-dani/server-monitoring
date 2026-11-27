@@ -149,30 +149,32 @@ sudo -u shsm shsm security scan --only heuristic
 sudo -u shsm shsm security scan --only clamav,rootkit
 ```
 
-### Manajemen Blokir IP Terpusat (Fail2Ban + iptables)
-SHSM menyediakan manajemen terpusat untuk memantau, memeriksa, memblokir, dan membuka blokir IP baik yang berada di Fail2Ban maupun di iptables:
+### Manajemen Blokir IP Terpusat (CSF + Fail2Ban + ipset + UFW/Firewalld + iptables)
+SHSM menyediakan manajemen terpusat untuk memantau, memeriksa, memblokir, dan membuka blokir IP lintas firewall aktif (CSF `DENYIN`/`LOCALINPUT`, `ipset`, Fail2Ban, UFW, Firewalld, dan `iptables`):
 ```bash
-# 1. Melihat semua IP & subnet yang sedang diblokir (dari Fail2Ban dan iptables):
+# 1. Melihat semua IP & subnet yang sedang diblokir:
 sudo -u shsm shsm blocked
 
 # 2. Memeriksa apakah IP tertentu sedang diblokir (termasuk deteksi jika terkena blokir subnet CIDR):
 sudo -u shsm shsm blocked <IP_ADDRESS>
 
 # 3. Blokir IP penyerang:
-# Default: Dikirim ke Fail2Ban (dengan fallback otomatis ke iptables jika Fail2Ban tidak aktif)
+# Default: Dikirim ke Fail2Ban / firewall aktif (dengan fallback otomatis ke ipset/iptables)
 sudo -u shsm shsm ban <IP_ADDRESS>
-# Tentukan jail tertentu:
+# Tentukan jail Fail2Ban tertentu:
 sudo -u shsm shsm ban <IP_ADDRESS> --jail ols-scanner
-# Atau blokir langsung di iptables (DROP rule):
+# Atau blokir langsung via firewall aktif / ipset / iptables:
 sudo -u shsm shsm ban <IP_ADDRESS> --iptables
 
-# 4. Buka blokir IP terpusat (otomatis membersihkan dari Fail2Ban DAN iptables sekaligus):
+# 4. Buka blokir IP terpusat (otomatis membersihkan dari Fail2Ban, CSF, ipset, UFW, Firewalld, dan iptables sekaligus):
 sudo -u shsm shsm unban <IP_ADDRESS>
 
 # 5. Pindai dan blokir masif semua IP scanner 404 (default ambang batas >= 30 error 404):
-# Simulasi:
+# Simulasi semua IP scanner (menampilkan status [SKIPPED] Already blocked vs [DRY-RUN] Would be blocked):
 sudo -u shsm shsm block-scanners --threshold 30 --dry-run
-# Eksekusi blokir via iptables:
+# Simulasi khusus IP yang BELUM diblokir saja:
+sudo -u shsm shsm block-scanners --threshold 30 --dry-run --unblocked-only
+# Eksekusi blokir otomatis:
 sudo -u shsm shsm block-scanners --threshold 30
 ```
 

@@ -400,10 +400,13 @@ sudo -u shsm shsm doctor
   3. **Cara Blokir Otomatis IP 404 Terbanyak Menggunakan SHSM**:
      SHSM memiliki fitur pemindaian log akses dan auto-drop iptables terpusat:
      ```bash
-     # Mode simulasi (melihat IP mana saja yang akan diblokir tanpa mengeksekusi):
+     # Mode simulasi (menampilkan mana yang sudah terblokir vs yang akan diblokir):
      sudo -u shsm shsm block-scanners --threshold 30 --dry-run
 
-     # Eksekusi blokir instan via iptables DROP untuk semua IP luar dengan 404 >= 30:
+     # Mode simulasi khusus IP yang BELUM diblokir saja:
+     sudo -u shsm shsm block-scanners --threshold 30 --dry-run --unblocked-only
+
+     # Eksekusi blokir instan via firewall/ipset/iptables untuk semua IP luar dengan 404 >= 30:
      sudo -u shsm shsm block-scanners --threshold 30
      ```
      *SHSM secara cerdas mengecualikan IP server Anda sendiri dan loopback (`127.0.0.1`), sehingga aman dijalankan.*

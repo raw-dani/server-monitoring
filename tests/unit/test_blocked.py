@@ -184,3 +184,43 @@ def test_cmd_block_scanners(tmp_path):
     assert "[DRY-RUN]" in result.output
     assert "127.0.0.1" not in result.output
 
+
+def test_cmd_block_scanners_dry_run_unblocked_only(tmp_path):
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from shsm.cli import cmd_block_scanners
+
+    log_file = tmp_path / "access.log"
+    lines = []
+    for _ in range(35):
+        lines.append('34.81.106.122 - - [28/Oct/2026:10:00:00 +0700] "GET /a HTTP/1.1" 404 100')
+        lines.append('198.51.100.25 - - [28/Oct/2026:10:00:00 +0700] "GET /b HTTP/1.1" 404 100')
+        lines.append('203.0.113.77 - - [28/Oct/2026:10:00:00 +0700] "GET /c HTTP/1.1" 404 100')
+    log_file.write_text("\n".join(lines), encoding="utf-8")
+
+    mock_blocked = [
+        {"source": "csf", "target": "198.51.100.25"},
+        {"source": "iptables", "target": "203.0.113.0/24"},
+    ]
+    runner = CliRunner()
+    with patch("shsm.security.blocked.list_all_blocked", return_value=mock_blocked):
+        res_all = runner.invoke(cmd_block_scanners, ["--log-file", str(log_file), "--threshold", "30", "--dry-run"], obj={})
+        assert res_all.exit_code == 0
+        assert "198.51.100.25" in res_all.output and "[SKIPPED] Already blocked" in res_all.output
+        assert "34.81.106.122" in res_all.output and "[DRY-RUN] Would be blocked" in res_all.output
+        assert "1 unblocked IP(s) would be blocked (2 already blocked)" in res_all.output
+
+        res_only = runner.invoke(
+            cmd_block_scanners,
+            ["--log-file", str(log_file), "--threshold", "30", "--dry-run", "--unblocked-only"],
+            obj={},
+        )
+        assert res_only.exit_code == 0
+        assert "34.81.106.122" in res_only.output
+        assert "198.51.100.25" not in res_only.output
+        assert "203.0.113.77" not in res_only.output
+        assert "[SKIPPED]" not in res_only.output
+
+
